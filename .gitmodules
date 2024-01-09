@@ -16,3 +16,15 @@
 [submodule ".config/vim/plugged/lightline.vim"]
 	path = .config/vim/plugged/lightline.vim
 	url = https://github.com/itchyny/lightline.vim.git
+[submodule ".config/vim/plugged/fern-renderer-nerdfont.vim"]
+	path = .config/vim/plugged/fern-renderer-nerdfont.vim
+	url = https://github.com/lambdalisue/fern-renderer-nerdfont.vim.git
+[submodule ".config/vim/plugged/fern.vim"]
+	path = .config/vim/plugged/fern.vim
+	url = https://github.com/lambdalisue/fern.vim.git
+[submodule ".config/vim/plugged/glyph-palette.vim"]
+	path = .config/vim/plugged/glyph-palette.vim
+	url = https://github.com/lambdalisue/glyph-palette.vim.git
+[submodule ".config/vim/plugged/nerdfont.vim"]
+	path = .config/vim/plugged/nerdfont.vim
+	url = https://github.com/lambdalisue/nerdfont.vim.git
