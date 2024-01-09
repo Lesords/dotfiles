@@ -28,3 +28,9 @@
 [submodule ".config/vim/plugged/nerdfont.vim"]
 	path = .config/vim/plugged/nerdfont.vim
 	url = https://github.com/lambdalisue/nerdfont.vim.git
+[submodule ".config/vim/plugged/undotree"]
+	path = .config/vim/plugged/undotree
+	url = https://github.com/mbbill/undotree.git
+[submodule ".config/vim/plugged/vista.vim"]
+	path = .config/vim/plugged/vista.vim
+	url = https://github.com/liuchengxu/vista.vim.git
