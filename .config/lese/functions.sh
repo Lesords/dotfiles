@@ -16,9 +16,9 @@ function current_branch() {
     git -C "$folder" rev-parse HEAD
 }
 
-function init-config() {
+function update-config() {
     echo "" >> $HOME/.bashrc
-    echo "source \"\$HOME/.config/lese/init.sh\"" >> $HOME/.bashrc
+    echo "source \"\$HOME/.config/lese/init.sh\" --file" >> $HOME/.bashrc
     echo "bashrc init successful"
 
     echo -e "please enter your git username: \c" && read username
