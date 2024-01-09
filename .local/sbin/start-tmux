@@ -1,0 +1,15 @@
+#!/bin/bash
+
+tmux new -s workSpace -d
+tmux rename-window -t "workSpace:0" code
+
+tmux send -t "workSpace:code" "cd ~" Enter
+
+tmux split-window -h -t "workSpace:code"
+tmux send -t "workSpace:code" "cd ~/codeSpace" Enter
+
+tmux split-window -t "workSpace:code"
+tmux send -t "workSpace:code" "cd ~/codeSpace" Enter
+tmux send -t "workSpace:code" "tmux select-pane -L" Enter
+
+tmux attach -t workSpace

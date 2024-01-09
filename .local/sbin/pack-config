@@ -1,0 +1,29 @@
+#!/bin/bash
+
+time=$(date "+%m-%d")
+tarName=serverConfig_${time}.tar.gz
+fileList=".vim .tmux.conf .gitconfig .config .local"
+
+if [ $# -eq 1 ]; then
+    if [ "$1" == "-all" ]; then
+        tarName=serverConfigAll_${time}.tar.gz
+        fileList=".vim .tmux.conf .gitconfig .ssh .bashrc .profile .config .local shell_cmd"
+    elif [ "$1" == "-config" ]; then
+        tarName=serverConfigConfig_${time}.tar.gz
+        fileList=".vim .tmux.conf .gitconfig .config/lazygit .config/lese .local/sbin"
+    elif [ "$1" == "-r" ]; then
+        tarName=serverConfigLinux_${time}.tar.gz
+        fileList=".ssh .bashrc .profile"
+    else
+        echo "packConfig: unrecognized option '$1'"
+        exit 1
+    fi
+fi
+
+
+echo "start compress ($fileList) to $tarName"
+
+cd ~
+tar -zcvf ${tarName} ${fileList}
+
+[ 0 -eq $? ] && echo "tar -zcvf ${tarName} (${fileList}) success!!!"
