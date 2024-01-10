@@ -40,3 +40,21 @@
 [submodule ".config/vim/plugged/vim-floaterm"]
 	path = .config/vim/plugged/vim-floaterm
 	url = https://github.com/voldikss/vim-floaterm.git
+[submodule ".config/vim/plugged/vim-signify"]
+	path = .config/vim/plugged/vim-signify
+	url = https://github.com/mhinz/vim-signify.git
+[submodule ".config/vim/plugged/vim-commentary"]
+	path = .config/vim/plugged/vim-commentary
+	url = https://github.com/tpope/vim-commentary.git
+[submodule ".config/vim/plugged/vim-surround"]
+	path = .config/vim/plugged/vim-surround
+	url = https://github.com/tpope/vim-surround.git
+[submodule ".config/vim/plugged/vim-easymotion"]
+	path = .config/vim/plugged/vim-easymotion
+	url = https://github.com/easymotion/vim-easymotion.git
+[submodule ".config/vim/plugged/vim-multiple-cursors"]
+	path = .config/vim/plugged/vim-multiple-cursors
+	url = https://github.com/terryma/vim-multiple-cursors.git
+[submodule ".config/vim/plugged/tabular"]
+	path = .config/vim/plugged/tabular
+	url = https://github.com/godlygeek/tabular.git
