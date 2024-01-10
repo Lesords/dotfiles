@@ -34,3 +34,9 @@
 [submodule ".config/vim/plugged/vista.vim"]
 	path = .config/vim/plugged/vista.vim
 	url = https://github.com/liuchengxu/vista.vim.git
+[submodule ".config/vim/plugged/LeaderF"]
+	path = .config/vim/plugged/LeaderF
+	url = https://github.com/Yggdroot/LeaderF.git
+[submodule ".config/vim/plugged/vim-floaterm"]
+	path = .config/vim/plugged/vim-floaterm
+	url = https://github.com/voldikss/vim-floaterm.git
