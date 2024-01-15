@@ -1,6 +1,6 @@
 #!/bin/bash
 
-alias reload='source ~/.config/lese/init.sh'
+alias reload='source ~/.bashrc'
 alias git-init='source ~/.config/lese/git-init.sh'
 alias lg='lazygit'
 alias gsta='git status'
