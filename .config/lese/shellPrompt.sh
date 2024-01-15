@@ -3,14 +3,14 @@
 export TERM=xterm-256color
 
 get_git_path() {
-    pwd=$PWD
+    pwd="$PWD"
     while [ "$pwd" != "/" ]; do
         # echo "current pwd: $pwd"
-        isGit=`ls -a $pwd | grep '^\.git$'`
+        isGit=`ls -a "$pwd" | grep '^\.git$'`
         if [ "$isGit" != "" ]; then
             echo $pwd && break
         fi
-        pwd=`dirname $pwd`
+        pwd=`dirname "$pwd"`
     done
 }
 
