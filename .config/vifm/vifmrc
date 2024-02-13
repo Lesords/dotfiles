@@ -494,4 +494,4 @@ fileviewer Makefile,*.sh bat --color always --wrap never --pager never %c -p
 " fileviewer *[^/],.*[^/] bat --color always --wrap never --pager never %c -p */
 
 " set invmillerview
-" set milleroptions='lsize:1,csize:1,rsize:1,rpreview:all'
+" set milleroptions='lsize:2,csize:3,rsize:5,rpreview:all'
