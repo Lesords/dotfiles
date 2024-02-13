@@ -40,7 +40,7 @@ dotStatus()
         files=`find $dir -type f | grep -v "vim"`
 
         for file in $files; do
-            [ ! -f "$HOME/$file" ] && echo "$file not exit" && continue
+            [ ! -f "$HOME/$file" ] && echo "$file not exist" && continue
             res="`diff $file $HOME/$file`"
 
             if [ "$res" ]; then
@@ -79,6 +79,58 @@ dotStatus()
     [ $flag == 0 -a $track == 0 ] && echo "all same"
 }
 
+diffRep()
+{
+    path=$PWD
+
+    cd $1 && rep_branch=`git rev-parse HEAD | cut -c-12`
+    cd $2 && cur_branch=`git rev-parse HEAD | cut -c-12`
+
+    cd $path && [ $rep_branch == $cur_branch ] && return 1
+
+    echo && echo -e "\e[38;5;11m$1 \e[38;5;11m-> \e[7m$HOME/\e[27m$1\e[0m"
+    echo -e "\e[1;31m$rep_branch\e[0m..\e[1;32m$cur_branch\e[0m"
+    return 0
+}
+
+diffFile()
+{
+    res="`diff $1 $2`"
+
+    if [ "$res" ]; then
+        if type diff-so-fancy >/dev/null 2>&1; then
+            echo && (diff -ru $1 $2 | diff-so-fancy)
+        else
+            diff -ru $1 $2
+        fi
+    fi
+}
+
+dotDiff()
+{
+    # Basic Configuration File
+    for dir in ${list[@]}; do
+        files=`find $dir -type f | grep -v "vim"`
+
+        for file in $files; do
+            [ ! -f "$HOME/$file" ] && echo "$file not exist" && continue
+            diffFile $file $HOME/$file
+        done
+    done
+
+    # Vim Configuration File
+    files=`find $vim -type f | grep -v "\.git"`
+    for file in $files; do
+        [ ! -f "$HOME/$file" ] && echo "$file not exist"
+        diffFile $file $HOME/$file
+    done
+
+    # Vim Plugin Configuration File
+    for dir in $vimplugin/*; do
+        diffRep $dir $HOME/$dir
+    done
+}
+
 if [ $# -ne 1 ]; then
     printUsage
     exit 1
@@ -89,6 +141,7 @@ case $1 in
         dotStatus
         ;;
     diff)
+        dotDiff
         ;;
     install)
         ;;
