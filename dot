@@ -1,0 +1,38 @@
+#!/bin/bash
+
+options="install diff status"
+vim='.vim'
+vimplugin='.config/vim/plugged'
+list=(
+    '.config'
+    '.local'
+    '.tmux.conf'
+)
+
+printUsage()
+{
+    echo "Usage: dot [OPTION]"
+    echo "OPTIONS:"
+    echo "  install"
+    echo "  diff"
+    echo "  status"
+}
+
+if [ $# -ne 1 ]; then
+    printUsage
+    exit 1
+fi
+
+case $1 in
+    status)
+        ;;
+    diff)
+        ;;
+    install)
+        ;;
+    *)
+        echo "error: wrong option" && echo
+        printUsage
+        exit 2
+        ;;
+esac
