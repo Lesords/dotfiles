@@ -33,14 +33,17 @@ judgeRepStatus()
 dotStatus()
 {
     flag=0
+    error=0
     dotpath=$PWD
+
+    echo "Dot status"
 
     # Basic Configuration File
     for dir in ${list[@]}; do
         files=`find $dir -type f | grep -v "vim"`
 
         for file in $files; do
-            [ ! -f "$HOME/$file" ] && echo "$file not exist" && continue
+            [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && error=1 && continue
             res="`diff $file $HOME/$file`"
 
             if [ "$res" ]; then
@@ -51,14 +54,21 @@ dotStatus()
     done
 
     # Vim Configuration File
-    judgeRepStatus $vim $HOME/$vim
-    if [ $? == 0 ]; then
-        [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-        echo -e "\e[1;31m    modified:   $vim\e[0;37m"
+    if [ ! -d "$HOME/$vim" ]; then
+        error=1
+        echo -e "    \e[1;31mnonexistent:   $vim\e[0m"
+    else
+        judgeRepStatus $vim $HOME/$vim
+        if [ $? == 0 ]; then
+            [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
+            echo -e "\e[1;31m    modified:   $vim\e[0;37m"
+        fi
     fi
 
     # Vim Plugin Configuration File
     for dir in $vimplugin/*; do
+        [ ! -d "$HOME/$dir" ] && echo -e "    \e[1;31mnonexistent:   $dir\e[0m" && error=1 && continue
+
         judgeRepStatus $dir $HOME/$dir
         if [ $? == 0 ]; then
             [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
@@ -69,14 +79,16 @@ dotStatus()
     # Untracked Configuration File
     track=0
     cd $HOME
-    for dir in ${list[0]}/*; do
-        if [ ! -d $dotpath/$dir ]; then
-            [ $track == 0 ] && track=1 && echo && echo "Untracked configuration:"
-            echo -e "\e[1;31m    $dir\e[0;37m"
-        fi
-    done
+    if [ -d ${list[0]} ]; then
+        for dir in ${list[0]}/*; do
+            if [ ! -d $dotpath/$dir ]; then
+                [ $track == 0 ] && track=1 && echo && echo "Untracked configuration:"
+                echo -e "\e[1;31m    $dir\e[0;37m"
+            fi
+        done
+    fi
 
-    [ $flag == 0 -a $track == 0 ] && echo "all same"
+    [ $flag == 0 -a $track == 0 -a error == 0 ] && echo "all same"
 }
 
 diffRep()
