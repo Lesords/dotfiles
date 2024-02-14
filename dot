@@ -120,27 +120,38 @@ diffFile()
 
 dotDiff()
 {
+    echo "Dot diff"
+
     # Basic Configuration File
     for dir in ${list[@]}; do
         files=`find $dir -type f | grep -v "vim"`
 
         for file in $files; do
-            [ ! -f "$HOME/$file" ] && echo "$file not exist" && continue
+            [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && continue
             diffFile $file $HOME/$file
         done
     done
 
     # Vim Configuration File
-    files=`find $vim -type f | grep -v "\.git"`
-    for file in $files; do
-        [ ! -f "$HOME/$file" ] && echo "$file not exist"
-        diffFile $file $HOME/$file
-    done
+    if [ ! -d $HOME/$vim ]; then
+        echo -e "    \e[1;31mnonexistent:   $vim\e[0m"
+    else
+        files=`find $vim -type f | grep -v "\.git"`
+        for file in $files; do
+            [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && continue
+            diffFile $file $HOME/$file
+        done
+    fi
 
     # Vim Plugin Configuration File
-    for dir in $vimplugin/*; do
-        diffRep $dir $HOME/$dir
-    done
+    if [ ! -d "$HOME/$vimplugin" ]; then
+        echo -e "    \e[1;31mnonexistent:   $vimplugin\e[0m"
+    else
+        for dir in $vimplugin/*; do
+            [ ! -d "$HOME/$dir" ] && echo -e "    \e[1;31mnonexistent:   $dir\e[0m" && continue
+            diffRep $dir $HOME/$dir
+        done
+    fi
 }
 
 dotInstall()
