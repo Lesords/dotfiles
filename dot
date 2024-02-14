@@ -131,6 +131,17 @@ dotDiff()
     done
 }
 
+dotInstall()
+{
+    for dir in ${list[@]}; do
+        cp -rf $dir $HOME/$dir
+        [ $? == 0 ] && echo "$dir install done"
+    done
+
+    cp -rf $vim $HOME/$vim
+    [ $? == 0 ] && echo "$vim install done"
+}
+
 if [ $# -ne 1 ]; then
     printUsage
     exit 1
@@ -144,6 +155,7 @@ case $1 in
         dotDiff
         ;;
     install)
+        dotInstall
         ;;
     *)
         echo "error: wrong option" && echo
