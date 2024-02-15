@@ -18,18 +18,6 @@ printUsage()
     echo "  status"
 }
 
-judgeRepStatus()
-{
-    path=$PWD
-
-    cd $1 && rep_branch=`git rev-parse HEAD 2>/dev/null`
-    cd $2 && cur_branch=`git rev-parse HEAD 2>/dev/null`
-
-    cd $path && [ "$rep_branch" == "$cur_branch" ] && return 1
-
-    return 0
-}
-
 dotStatus()
 {
     flag=0
@@ -58,22 +46,43 @@ dotStatus()
         error=1
         echo -e "    \e[1;31mnonexistent:   $vim\e[0m"
     else
-        judgeRepStatus $vim $HOME/$vim
-        if [ $? == 0 ]; then
-            [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-            echo -e "\e[1;31m    modified:   $vim\e[0;37m"
-        fi
+        files=`find $vim -type f | grep -v "\.git"`
+        for file in $files; do
+            if [ ! -f "$HOME/$file" ]; then
+                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
+                echo -e "\e[1;31m    modified:   $vim\e[0;37m" && break
+            fi
+
+            res="`diff $file $HOME/$file`"
+
+            if [ "$res" ]; then
+                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
+                echo -e "\e[1;31m    modified:   $vim\e[0;37m" && break
+            fi
+        done
     fi
 
     # Vim Plugin Configuration File
     for dir in $vimplugin/*; do
-        [ ! -d "$HOME/$dir" ] && echo -e "    \e[1;31mnonexistent:   $dir\e[0m" && error=1 && continue
-
-        judgeRepStatus $dir $HOME/$dir
-        if [ $? == 0 ]; then
+        if [ ! -d "$HOME/$dir" ]; then
             [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-            echo -e "\e[1;31m    modified:   $dir\e[0;37m"
+            echo -e "    \e[1;31mnonexistent:   $dir\e[0m" && continue
         fi
+
+        files=`find $dir -type f | grep -v "\.git"`
+        for file in $files; do
+            if [ ! -f "$HOME/$file" ]; then
+                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
+                echo -e "\e[1;31m    modified:   $dir\e[0;37m" && break
+            fi
+
+            res="`diff $file $HOME/$file`"
+
+            if [ "$res" ]; then
+                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
+                echo -e "\e[1;31m    modified:   $dir\e[0;37m" && break
+            fi
+        done
     done
 
     # Untracked Configuration File
@@ -88,7 +97,7 @@ dotStatus()
         done
     fi
 
-    [ $flag == 0 -a $track == 0 -a error == 0 ] && echo "all same"
+    [ $flag == 0 -a $track == 0 -a $error == 0 ] && echo "all same"
 }
 
 diffRep()
