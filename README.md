@@ -9,6 +9,7 @@ Here's what I have configured so far:
 - lazygit configuration
 - ranger configuration
 - vifm configuration
+- joshuto configuration
 - Some useful bash files
 
 # Installation
@@ -22,8 +23,27 @@ cd ~
 git clone git@github.com:Lesords/dotfiles.git --depth 1 --recurse-submodules --shallow-submodules
 ```
 
-Then select the desired configuration file to move to the user directory
+Next, use the following command to move the configuration file to the user directory
 
+```bash
+cd dotfiles
+./dot install
+```
+
+After the file move is complete, you can verify the configuration file using the following command
+
+```bash
+./dot status
+./dot diff
+```
+
+Then, you can use the following command to bring the configuration file into effect
+
+```bash
+~/.config/lese/init.sh --config
+```
+
+Finally restart your terminal
 
 ## Git
 
