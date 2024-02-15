@@ -158,12 +158,18 @@ dotDiff()
 
 dotInstall()
 {
+    echo "Dot install"
+
+    # Basic Configuration File
     for dir in ${list[@]}; do
-        cp -rf $dir $HOME/$dir
+        cp -rf $dir $HOME
         [ $? == 0 ] && echo "$dir install done"
     done
 
-    cp -rf $vim $HOME/$vim
+    # Vim Configuration File
+    cp -rf $vim $HOME
+    find $HOME/$vim -name "\.git" | xargs rm -rf
+    find $HOME/$vimplugin -name "\.git" | xargs rm -rf
     [ $? == 0 ] && echo "$vim install done"
 }
 
