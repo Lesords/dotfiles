@@ -22,10 +22,10 @@ judgeRepStatus()
 {
     path=$PWD
 
-    cd $1 && rep_branch=`git rev-parse HEAD`
-    cd $2 && cur_branch=`git rev-parse HEAD`
+    cd $1 && rep_branch=`git rev-parse HEAD 2>/dev/null`
+    cd $2 && cur_branch=`git rev-parse HEAD 2>/dev/null`
 
-    cd $path && [ $rep_branch == $cur_branch ] && return 1
+    cd $path && [ "$rep_branch" == "$cur_branch" ] && return 1
 
     return 0
 }
@@ -95,10 +95,12 @@ diffRep()
 {
     path=$PWD
 
-    cd $1 && rep_branch=`git rev-parse HEAD | cut -c-12`
-    cd $2 && cur_branch=`git rev-parse HEAD | cut -c-12`
+    cd $1 && rep_branch=`git rev-parse HEAD 2>/dev/null | cut -c-12`
+    cd $2 && cur_branch=`git rev-parse HEAD 2>/dev/null | cut -c-12`
 
-    cd $path && [ $rep_branch == $cur_branch ] && return 1
+    cd $path && [ "$rep_branch" == "$cur_branch" ] && return 1
+
+    if [ -z $cur_branch ]; then cur_branch="NULL"; fi
 
     echo && echo -e "\e[38;5;11m$1 \e[38;5;11m-> \e[7m$HOME/\e[27m$1\e[0m"
     echo -e "\e[1;31m$rep_branch\e[0m..\e[1;32m$cur_branch\e[0m"
