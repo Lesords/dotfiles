@@ -100,22 +100,6 @@ dotStatus()
     [ $flag == 0 -a $track == 0 -a $error == 0 ] && echo "all same"
 }
 
-diffRep()
-{
-    path=$PWD
-
-    cd $1 && rep_branch=`git rev-parse HEAD 2>/dev/null | cut -c-12`
-    cd $2 && cur_branch=`git rev-parse HEAD 2>/dev/null | cut -c-12`
-
-    cd $path && [ "$rep_branch" == "$cur_branch" ] && return 1
-
-    if [ -z $cur_branch ]; then cur_branch="NULL"; fi
-
-    echo && echo -e "\e[38;5;11m$1 \e[38;5;11m-> \e[7m$HOME/\e[27m$1\e[0m"
-    echo -e "\e[1;31m$rep_branch\e[0m..\e[1;32m$cur_branch\e[0m"
-    return 0
-}
-
 diffFile()
 {
     res="`diff $1 $2`"
@@ -160,7 +144,12 @@ dotDiff()
     else
         for dir in $vimplugin/*; do
             [ ! -d "$HOME/$dir" ] && echo -e "    \e[1;31mnonexistent:   $dir\e[0m" && continue
-            diffRep $dir $HOME/$dir
+
+            files=`find $dir -type f | grep -v "\.git"`
+            for file in $files; do
+                [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && continue
+                diffFile $file $HOME/$file
+            done
         done
     fi
 }
