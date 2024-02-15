@@ -25,4 +25,6 @@ function joshuto() {
 	esac
 }
 
-bind '"\ej": "\C-ujoshuto\C-m"'
+if type joshuto >/dev/null 2>&1; then
+    bind '"\ej": "\C-ujoshuto\C-m"'
+fi

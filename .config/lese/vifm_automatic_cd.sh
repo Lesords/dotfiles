@@ -10,4 +10,6 @@ vicd()
     cd "$dst"
 }
 
-bind '"\eo": "\C-uvicd .\C-m"'
+if type vifm >/dev/null 2>&1; then
+    bind '"\eo": "\C-uvicd .\C-m"'
+fi

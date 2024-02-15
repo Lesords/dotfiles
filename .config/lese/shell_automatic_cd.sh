@@ -20,5 +20,7 @@ ranger-cd() {
     rm -f -- "$temp_file"
 }
 
-# This binds Ctrl-O to ranger-cd:
-bind '"\C-o":"\C-uranger-cd\C-m"'
+if type ranger >/dev/null 2>&1; then
+    # This binds Ctrl-O to ranger-cd:
+    bind '"\C-o":"\C-uranger-cd\C-m"'
+fi
