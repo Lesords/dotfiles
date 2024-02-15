@@ -21,7 +21,7 @@ git_branch() {
         current_owner=`whoami`
         [ "$git_owner" != "$current_owner" ] && return
 
-        if [ "$(git branch)" == "" ]; then echo " (NULL)" && return; fi
+        if [ "$(git branch 2>/dev/null)" == "" ]; then echo " (NULL)" && return; fi
         local branch=`git rev-parse --abbrev-ref HEAD | grep -v HEAD || \
         git describe --exact-match HEAD 2> /dev/null || \
         git rev-parse HEAD`
