@@ -15,6 +15,12 @@ icdiff_config() {
     git config --global icdiff.options '--highlight --line-numbers'
 }
 
+http_config() {
+    git config --global http.postBuffer    5000000
+    git config --global http.lowSpeedLimit 0
+    git config --global http.lowSpeedTime  999999
+}
+
 diffSF_config() {
     git config --global core.pager "diff-so-fancy | less --tabs=4 -RFX"
     git config --global interactive.diffFilter "diff-so-fancy --patch"
@@ -31,6 +37,7 @@ main() {
     fi
 
     core_config
+    http_config
 
     icdiff_config
     diffSF_config
