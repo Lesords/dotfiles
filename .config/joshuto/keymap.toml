@@ -7,8 +7,9 @@ keymap = [
   { keys = ["T"], commands = ["new_tab --current"] },
   { keys = ["W"], commands = ["close_tab"] },
   { keys = ["ctrl+w"], commands = ["close_tab"] },
-  { keys = ["q"], commands = ["close_tab"] },
   { keys = ["ctrl+c"], commands = ["quit"] },
+  { keys = ["ctrl+q"], commands = ["quit"] },
+  { keys = ["q"], commands = ["quit --output-current-directory"] },
   { keys = ["Q"], commands = ["quit --output-current-directory"] },
 
   { keys = ["o"], commands = ["shell vim %s"] },
