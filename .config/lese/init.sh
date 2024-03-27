@@ -21,6 +21,7 @@ fi
 
 if [ "$1" == "--file" ]; then
     source "$HOME/.config/lese/config.sh"
+    source "$HOME/.config/lese/keymap.sh"
     source "$HOME/.config/lese/functions.sh"
     source "$HOME/.config/lese/shellPrompt.sh"
     source "$HOME/.config/lese/shell_automatic_cd.sh"    # ranger
