@@ -20,6 +20,11 @@ diffSF_config() {
     git config --global interactive.diffFilter "diff-so-fancy --patch"
 }
 
+gpg_config() {
+    git config --global user.signingkey `get-gpg-id`
+    git config --global commit.gpgsign true
+}
+
 main() {
     if [ $# -eq 2 ]; then
         user_config $1 $2
@@ -29,6 +34,10 @@ main() {
 
     icdiff_config
     diffSF_config
+
+    if [ "`get-gpg-id`" ]; then
+        gpg_config
+    fi
 }
 
 if [[ $# -eq 1 && $1 == "--help" || $1 == "-h" ]]; then

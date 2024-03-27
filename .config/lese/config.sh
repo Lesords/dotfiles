@@ -8,6 +8,12 @@ alias git-count='git log --pretty=tformat: --numstat | gawk '"'"'{ add += $1 ; s
 alias slow='less --tabs=4 -RFX'
 alias diff-better='diff-so-fancy | slow'
 
+alias gen-key='ssh-keygen -m PEM -t rsa -b 4096 -C' # with comment
+alias test-github='ssh -T git@github.com'
+alias gen-gpg='gpg --full-generate-key'
+alias get-gpg-id='gpg --list-secret-keys --keyid-format=long | grep "sec" | cut -d "/" -f 2 | cut -d " " -f 1'
+alias get-gpg-key='gpg --armor --export `get-gpg-id`'
+
 if [ -d "$HOME/.local/sbin" ]; then
     PATH="$HOME/.local/sbin:$PATH"
 fi
