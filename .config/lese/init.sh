@@ -20,6 +20,7 @@ if [ "$1" == "--config" ]; then
 fi
 
 if [ "$1" == "--file" ]; then
+    source "$HOME/.config/lese/fzf.sh"
     source "$HOME/.config/lese/config.sh"
     source "$HOME/.config/lese/keymap.sh"
     source "$HOME/.config/lese/functions.sh"
