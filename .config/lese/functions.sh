@@ -17,10 +17,6 @@ function current_branch() {
 }
 
 function update-config() {
-    echo "" >> $HOME/.bashrc
-    echo "source \"\$HOME/.config/lese/init.sh\" --file" >> $HOME/.bashrc
-    echo "bashrc init successful"
-
     echo -e "please enter your git username: \c" && read username
     echo -e "please enter your git email: \c" && read email
 

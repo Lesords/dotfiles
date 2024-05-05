@@ -1,13 +1,28 @@
 #!/bin/bash
 
 if [ $# -lt 1 ]; then
-    echo "error: argument missing" && exit 1
+    echo "ERROR: argument missing" \
+        && echo "OPTION: " \
+        && echo "  --config    initialization configuration file" \
+        && exit 1
 fi
 
 if [ "$1" == "--config" ]; then
-    echo "" >> $HOME/.bashrc
-    echo "source \"\$HOME/.config/lese/init.sh\" --file" >> $HOME/.bashrc
-    echo "bashrc init successful"
+    is_init=`tail -3 ~/.profile | grep "config/lese/init.sh"`
+
+    if [ "$is_init" ]; then
+        echo "profile already initialized"
+    else
+        echo "" >> $HOME/.profile
+        echo "source \"\$HOME/.config/lese/init.sh\" --file" >> $HOME/.profile
+        echo "profile init successful"
+    fi
+
+    echo -e "Do you need to initialize git?(y/n) \c" && read option
+
+    if [ "$option" == "n" ]; then
+        exit 0
+    fi
 
     echo -e "please enter your git username: \c" && read username
     echo -e "please enter your git email: \c" && read email
