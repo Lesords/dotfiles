@@ -4,7 +4,7 @@ if type fzf >/dev/null 2>&1; then
     eval "$(fzf --bash)"
 
     alias fzf-vim="fzf --bind 'enter:become(vim {})'"
-    bind '"\C-f": "\C-ufzf-vim\C-m"'
+    if [ -t 1 ]; then bind '"\C-f": "\C-ufzf-vim\C-m"'; fi
 fi
 
 export FZF_DEFAULT_OPTS='

@@ -26,5 +26,5 @@ function joshuto() {
 }
 
 if type joshuto >/dev/null 2>&1; then
-    bind '"\ej": "\C-ujoshuto\C-m"'
+    if [ -t 1 ]; then bind '"\ej": "\C-ujoshuto\C-m"'; fi
 fi

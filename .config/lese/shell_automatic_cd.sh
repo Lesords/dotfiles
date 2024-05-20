@@ -22,5 +22,5 @@ ranger-cd() {
 
 if type ranger >/dev/null 2>&1; then
     # This binds Ctrl-O to ranger-cd:
-    bind '"\C-o":"\C-uranger-cd\C-m"'
+    if [ -t 1 ]; then bind '"\C-o":"\C-uranger-cd\C-m"'; fi
 fi

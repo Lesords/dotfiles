@@ -11,5 +11,5 @@ vicd()
 }
 
 if type vifm >/dev/null 2>&1; then
-    bind '"\eo": "\C-uvicd .\C-m"'
+    if [ -t 1 ]; then bind '"\eo": "\C-uvicd .\C-m"'; fi
 fi
