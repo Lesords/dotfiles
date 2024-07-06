@@ -160,12 +160,12 @@ dotInstall()
 
     # Basic Configuration File
     for dir in ${list[@]}; do
-        cp -rf $dir $HOME
+        rsync -av $dir $HOME
         [ $? == 0 ] && echo "$dir install done"
     done
 
     # Vim Configuration File
-    cp -rf $vim $HOME
+    rsync -av $vim $HOME
     find $HOME/$vim -name "\.git" | xargs rm -rf
     find $HOME/$vimplugin -name "\.git" | xargs rm -rf
     [ $? == 0 ] && echo "$vim install done"
