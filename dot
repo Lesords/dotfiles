@@ -13,8 +13,8 @@ printUsage()
 {
     echo "Usage: dot [OPTION]"
     echo "OPTIONS:"
-    echo "  install"
-    echo "  diff"
+    echo "  install [--config]"
+    echo "  diff    [--config]"
     echo "  status"
 }
 
@@ -127,6 +127,10 @@ dotDiff()
         done
     done
 
+    if [ "$1" == "--config" ]; then
+        return
+    fi
+
     # Vim Configuration File
     if [ ! -d $HOME/$vim ]; then
         echo -e "    \e[1;31mnonexistent:   $vim\e[0m"
@@ -160,9 +164,17 @@ dotInstall()
 
     # Basic Configuration File
     for dir in ${list[@]}; do
-        rsync -av $dir $HOME
+        if [ "$1" == "--config" ]; then
+            rsync -av --exclude='vim/'  $dir $HOME
+        else
+            rsync -av $dir $HOME
+        fi
         [ $? == 0 ] && echo "$dir install done"
     done
+
+    if [ "$1" == "--config" ]; then
+        return
+    fi
 
     # Vim Configuration File
     rsync -av $vim $HOME
@@ -171,7 +183,7 @@ dotInstall()
     [ $? == 0 ] && echo "$vim install done"
 }
 
-if [ $# -ne 1 ]; then
+if [ $# -lt 1 ]; then
     printUsage
     exit 1
 fi
@@ -181,10 +193,10 @@ case $1 in
         dotStatus
         ;;
     diff)
-        dotDiff
+        dotDiff $2
         ;;
     install)
-        dotInstall
+        dotInstall $2
         ;;
     *)
         echo "error: wrong option" && echo
