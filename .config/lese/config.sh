@@ -3,6 +3,7 @@
 alias reload='source ~/.profile'
 alias git-init='source ~/.config/lese/git-init.sh'
 alias lg='lazygit'
+alias bear="bear -l $HOME/.local/lib/libear.so"
 alias gsta='git status'
 alias glog='git log --oneline --graph --color --all --decorate'
 alias g-branch='git log --graph --decorate --oneline --simplify-by-decoration --all'
