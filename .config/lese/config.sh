@@ -27,3 +27,5 @@ if [ -d "$HOME/.local/sbin" ]; then
 fi
 
 export GPG_TTY=$(tty)
+
+export LD_LIBRARY_PATH="$HOME/.local/lib"
