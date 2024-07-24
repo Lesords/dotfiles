@@ -52,3 +52,7 @@ function close-proxy() {
     unset http_proxy
     echo "close proxy successful"
 }
+
+function modify() {
+    vim -d $1 $HOME/$1
+}
