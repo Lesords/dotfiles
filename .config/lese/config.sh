@@ -1,6 +1,7 @@
 #!/bin/bash
 
 alias reload='source ~/.profile'
+alias list="find . -maxdepth 1 -type d \( ! -name . \) -printf '%f\n'"
 alias git-init='source ~/.config/lese/git-init.sh'
 alias lg='lazygit'
 alias bear="bear -l $HOME/.local/lib/libear.so"
