@@ -61,3 +61,7 @@ function mkcd() {
     mkdir $1
     cd $1
 }
+
+function hexof() {
+    hexdump -C $1 | less
+}
