@@ -56,3 +56,8 @@ function close-proxy() {
 function modify() {
     vim -d $1 $HOME/$1
 }
+
+function mkcd() {
+    mkdir $1
+    cd $1
+}
