@@ -13,9 +13,9 @@ keymap = [
   { keys = ["Q"], commands = ["quit --output-current-directory"] },
 
   { keys = ["o"], commands = ["shell vim %s"] },
-  { keys = ["v", "v"], commands = ["shell bat %s"] },
+  { keys = ["v", "v"], commands = ["shell bat %s --paging=always"] },
   { keys = ["v", "p"], commands = ["shell bat %s --color always -p"] },
-  { keys = ["v", "n"], commands = ["shell bat %s --color always -p -n"] },
+  { keys = ["v", "n"], commands = ["shell bat %s --color always -p -n --paging=always"] },
 
   { keys = ["R"], commands = ["reload_dirlist"] },
   { keys = ["z", "h"], commands = ["toggle_hidden"] },
