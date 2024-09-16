@@ -26,6 +26,12 @@ diffSF_config() {
     git config --global interactive.diffFilter "diff-so-fancy --patch"
 }
 
+delta_config() {
+    git config --global include.path "$HOME/.config/delta/.gitconfig"
+    git config --global core.pager "delta"
+    git config --global --unset interactive.diffFilter
+}
+
 gpg_config() {
     git config --global user.signingkey `get-gpg-id`
     git config --global commit.gpgsign true
