@@ -7,6 +7,7 @@ alias lg='lazygit'
 alias bear="bear -l $HOME/.local/lib/libear.so"
 alias gsta='git status'
 alias glog='git log --oneline --graph --color --all --decorate'
+alias g-tags='git ls-remote --tags'
 alias g-branch='git log --graph --decorate --oneline --simplify-by-decoration --all'
 alias gsub-clone='git clone --depth 1 --recurse-submodules --shallow-submodules'
 alias gsub-init='git submodule update --init --recursive --depth 1'
