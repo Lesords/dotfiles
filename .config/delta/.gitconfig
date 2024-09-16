@@ -1,0 +1,15 @@
+[include]
+    path = ~/.config/delta/theme/.gitconfig
+
+[interactive]
+    diffFilter = delta --color-only
+
+[delta]
+    features = gruvmax-fang
+    navigate = true
+
+[merge]
+    conflictstyle = diff3
+
+[diff]
+    colorMoved = default
