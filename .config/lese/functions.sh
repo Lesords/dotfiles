@@ -65,3 +65,8 @@ function mkcd() {
 function hexof() {
     hexdump -C $1 | less
 }
+
+function del-self() {
+    folder_name=$(basename "$PWD")
+    cd .. && rm -rf $folder_name
+}
