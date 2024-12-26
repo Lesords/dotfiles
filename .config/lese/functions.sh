@@ -70,3 +70,11 @@ function del-self() {
     folder_name=$(basename "$PWD")
     cd .. && rm -rf $folder_name
 }
+
+function show-url() {
+    urls=$(git remote -v | awk '{print $2}' | uniq | cut -d ':' -f 2)
+    for url in $urls;
+    do
+        echo "https://github.com/$url"
+    done
+}
