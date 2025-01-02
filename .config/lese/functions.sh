@@ -32,7 +32,7 @@ function count() {
         echo "error: miss username parameter" && return
     fi
 
-    w | grep $1 | wc -l
+    echo "$(w | grep $1 | wc -l), $(who | grep $1 | wc -l)"
 }
 
 function init-proxy() {
