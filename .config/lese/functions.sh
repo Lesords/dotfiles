@@ -78,3 +78,15 @@ function show-url() {
         echo "https://github.com/$url"
     done
 }
+
+function gen-clang-config() {
+    CONFIG_FILE=.clang-format
+    [ "$1" ] && CONFIG_FILE=$1
+
+    if type clang-format >/dev/null 2>&1; then
+        clang-format -style=llvm --dump-config > $CONFIG_FILE
+        [ $? -eq 0 ] && echo "$CONFIG_FILE generate successfully"
+    else
+        echo "clang-format does not exist"
+    fi
+}
