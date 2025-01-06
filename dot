@@ -2,7 +2,7 @@
 
 options="install diff status"
 vim='.vim'
-vimplugin='.config/vim/plugged'
+vimplugin='.vim/plugged'
 list=(
     '.config'
     '.local'
