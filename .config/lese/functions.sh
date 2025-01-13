@@ -66,6 +66,14 @@ function hexof() {
     hexdump -C $1 | less
 }
 
+function rgl() {
+    rg -p "$@" | slow
+}
+
+function rgd() {
+    rg --json "$@" | delta --no-gitconfig --hyperlinks --tabs 0
+}
+
 function del-self() {
     folder_name=$(basename "$PWD")
     cd .. && rm -rf $folder_name
