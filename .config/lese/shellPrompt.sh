@@ -30,9 +30,15 @@ git_branch() {
 }
 
 BLUE='\033[36m'
+PURPLE='\033[35m'
 WHITE='\033[37m'
 YELLOW='\033[33m'
-PS1='\n${debian_chroot:+($debian_chroot)}'"$BLUE\u$WHITE@$YELLOW\h $BLUE\w$WHITE"'$(git_branch)\n> '
+
+if [ "$MSYSTEM" ]; then
+    PS1='\n${debian_chroot:+($debian_chroot)}'"$BLUE\u$WHITE@$YELLOW\h $PURPLE$MSYSTEM $BLUE\w$WHITE"'`__git_ps1`\n$ '
+else
+    PS1='\n${debian_chroot:+($debian_chroot)}'"$BLUE\u$WHITE@$YELLOW\h $BLUE\w$WHITE"'`git_branch`\n> '
+fi
 
 # ranger prompt
 [ -n "$RANGER_LEVEL" ] && PS1="$PS1"'(in ranger) '
