@@ -6,7 +6,7 @@ function current_branch() {
     local folder="$(pwd)"
     [ -n "$1" ] && folder="$1"
 
-    local isGit=`ls -a $folder | grep '^\.git$'`
+    local isGit=`ls -a $folder | grep -E '^\.git/?$'`
     if [ "$isGit" == "" ]; then
         echo "fatal: $folder is not a git repository" && return
     fi

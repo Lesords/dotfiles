@@ -6,7 +6,7 @@ get_git_path() {
     pwd="$PWD"
     while [ "$pwd" != "/" ]; do
         # echo "current pwd: $pwd"
-        isGit=`ls -a "$pwd" | grep '^\.git$'`
+        isGit=`ls -a "$pwd" | grep -E '^\.git/?$'`
         if [ "$isGit" != "" ]; then
             echo $pwd && break
         fi
@@ -17,7 +17,7 @@ get_git_path() {
 git_branch() {
     local isGit=$(get_git_path)
     if [ "$isGit" != "" ]; then
-        git_owner=`ls -al $isGit | grep \.git$ | awk '{print $3}'`
+        git_owner=`ls -al $isGit | grep -E '\.git/?$' | awk '{print $3}'`
         current_owner=`whoami`
         [ "$git_owner" != "$current_owner" ] && return
 
