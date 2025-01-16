@@ -2,6 +2,7 @@
 
 alias reload='source ~/.profile'
 alias list="find . -maxdepth 1 -type d \( ! -name . \) -printf '%f\n'"
+alias fname='find -maxdepth 1 -type f -iname'
 alias git-init='source ~/.config/lese/git-init.sh'
 alias lg='lazygit'
 alias bear="bear -l $HOME/.local/lib/libear.so"
@@ -16,8 +17,9 @@ alias git-count='git log --pretty=tformat: --numstat | gawk '"'"'{ add += $1 ; s
 alias slow='less --tabs=4 -RFX'
 alias diff-better='diff-so-fancy | slow'
 
-alias gen-key='ssh-keygen -m PEM -t rsa -b 4096 -C' # with comment
+alias sshmv='ssh-keygen -R '
 alias test-github='ssh -T git@github.com'
+alias gen-key='ssh-keygen -m PEM -t rsa -b 4096 -C' # with comment
 alias kill-gpg='gpgconf --kill all'
 alias gen-gpg='gpg --full-generate-key'
 alias get-gpg-id='gpg --list-secret-keys --keyid-format=long 2> /dev/null | grep "sec" | cut -d "/" -f 2 | cut -d " " -f 1'
