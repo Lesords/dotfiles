@@ -10,6 +10,7 @@ if [ -t 1 ]; then
     bind '";s": "\C-uls `la`\C-m"'
     bind '";mt": "\C-usudo mount"'
     bind '";mr": "\C-usudo umount"'
+    bind '";j": "\C-utmux at -t "'
     bind '";f": "\C-ufind . -type f -name \""'
     bind '";g": "\C-ugit clone --depth 1 --recurse-submodules --shallow-submodules "'
 fi
