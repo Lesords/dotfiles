@@ -566,7 +566,13 @@ nnoremap <c-u> <c-w>x
 " https://github.com/cirala/vifm_devicons
 
 " lese added
-source ~/.config/vifm/favicons.vifm
+if has('win')
+    source $APPDATA/Vifm/favicons.vifm
+    nnoremap o :!start %f<cr>
+    nnoremap <c-o> :!start %d<cr>
+else
+    source ~/.config/vifm/favicons.vifm
+endif
 set number
 set mouse=a
 colorscheme gruvbox
