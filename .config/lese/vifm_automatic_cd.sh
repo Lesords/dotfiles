@@ -7,7 +7,10 @@ vicd()
         echo 'Directory picking cancelled/failed'
         return 1
     fi
-    cd "$dst"
+    if [[ "$dst" =~ ^[[:space:]] ]]; then
+        dst=$(echo "$dst" | sed 's/^[[:space:]]*//')
+    fi
+    cd "$dst" || echo "$dst"
 }
 
 if type vifm >/dev/null 2>&1; then
