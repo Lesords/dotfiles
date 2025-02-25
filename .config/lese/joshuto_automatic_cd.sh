@@ -1,6 +1,6 @@
 #!/bin/bash
 
-function joshuto() {
+function joshuto-cd() {
 	ID="$$"
 	mkdir -p /tmp/$USER
 	OUTPUT_FILE="/tmp/$USER/joshuto-cwd-$ID"
@@ -26,5 +26,5 @@ function joshuto() {
 }
 
 if type joshuto >/dev/null 2>&1; then
-    if [ -t 1 ]; then bind '"\ej": "\C-ujoshuto\C-m"'; fi
+    if [ -t 1 ]; then bind '"\ej": "\C-ujoshuto-cd\C-m"'; fi
 fi
