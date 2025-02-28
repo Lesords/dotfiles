@@ -579,6 +579,7 @@ colorscheme gruvbox
 nnoremap <c-l> <c-w>l
 nnoremap <c-h> <c-w>h
 nnoremap q :q<cr>
+nnoremap ,h :history<cr>
 
 fileviewer *.[ch],*.[ch]pp,*.[ch]xx bat --color always --wrap never --pager never %c -p
 fileviewer Makefile,*.sh bat --color always --wrap never --pager never %c -p
