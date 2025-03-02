@@ -1,8 +1,6 @@
 #!/bin/bash
 
 options="install diff status"
-vim='.vim'
-vimplugin='.vim/plugged'
 list=(
     '.config'
     '.local'
@@ -28,7 +26,7 @@ dotStatus()
 
     # Basic Configuration File
     for dir in ${list[@]}; do
-        files=`find $dir -type f | grep -v "vim"`
+        files=`find $dir -type f`
 
         for file in $files; do
             [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && error=1 && continue
@@ -37,50 +35,6 @@ dotStatus()
             if [ "$res" ]; then
                 [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
                 echo -e "\e[1;31m    modified:   $file\e[0;37m"
-            fi
-        done
-    done
-
-    # Vim Configuration File
-    if [ ! -d "$HOME/$vim" ]; then
-        error=1
-        echo -e "    \e[1;31mnonexistent:   $vim\e[0m"
-    else
-        files=`find $vim -type f | grep -v "\.git"`
-        for file in $files; do
-            if [ ! -f "$HOME/$file" ]; then
-                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-                echo -e "\e[1;31m    modified:   $vim\e[0;37m" && break
-            fi
-
-            res="`diff $file $HOME/$file`"
-
-            if [ "$res" ]; then
-                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-                echo -e "\e[1;31m    modified:   $vim\e[0;37m" && break
-            fi
-        done
-    fi
-
-    # Vim Plugin Configuration File
-    for dir in $vimplugin/*; do
-        if [ ! -d "$HOME/$dir" ]; then
-            [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-            echo -e "    \e[1;31mnonexistent:   $dir\e[0m" && continue
-        fi
-
-        files=`find $dir -type f | grep -v "\.git"`
-        for file in $files; do
-            if [ ! -f "$HOME/$file" ]; then
-                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-                echo -e "\e[1;31m    modified:   $dir\e[0;37m" && break
-            fi
-
-            res="`diff $file $HOME/$file`"
-
-            if [ "$res" ]; then
-                [ $flag == 0 ] && flag=1 && echo "Changes for dotfiles:"
-                echo -e "\e[1;31m    modified:   $dir\e[0;37m" && break
             fi
         done
     done
@@ -119,43 +73,13 @@ dotDiff()
 
     # Basic Configuration File
     for dir in ${list[@]}; do
-        files=`find $dir -type f | grep -v "vim"`
+        files=`find $dir -type f`
 
         for file in $files; do
             [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && continue
             diffFile $file $HOME/$file
         done
     done
-
-    if [ "$1" == "--config" ]; then
-        return
-    fi
-
-    # Vim Configuration File
-    if [ ! -d $HOME/$vim ]; then
-        echo -e "    \e[1;31mnonexistent:   $vim\e[0m"
-    else
-        files=`find $vim -type f | grep -v "\.git"`
-        for file in $files; do
-            [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && continue
-            diffFile $file $HOME/$file
-        done
-    fi
-
-    # Vim Plugin Configuration File
-    if [ ! -d "$HOME/$vimplugin" ]; then
-        echo -e "    \e[1;31mnonexistent:   $vimplugin\e[0m"
-    else
-        for dir in $vimplugin/*; do
-            [ ! -d "$HOME/$dir" ] && echo -e "    \e[1;31mnonexistent:   $dir\e[0m" && continue
-
-            files=`find $dir -type f | grep -v "\.git"`
-            for file in $files; do
-                [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && continue
-                diffFile $file $HOME/$file
-            done
-        done
-    fi
 }
 
 dotInstall()
@@ -164,23 +88,9 @@ dotInstall()
 
     # Basic Configuration File
     for dir in ${list[@]}; do
-        if [ "$1" == "--config" ]; then
-            rsync -av --exclude='vim/'  $dir $HOME
-        else
-            rsync -av $dir $HOME
-        fi
+        rsync -av $dir $HOME
         [ $? == 0 ] && echo "$dir install done"
     done
-
-    if [ "$1" == "--config" ]; then
-        return
-    fi
-
-    # Vim Configuration File
-    rsync -av $vim $HOME
-    find $HOME/$vim -name "\.git" | xargs rm -rf
-    find $HOME/$vimplugin -name "\.git" | xargs rm -rf
-    [ $? == 0 ] && echo "$vim install done"
 }
 
 if [ $# -lt 1 ]; then
