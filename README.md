@@ -4,12 +4,14 @@ This is my linux configuration
 
 Here's what I have configured so far:
 
-- vim configuration and plugins (submodules)
+- [Vim configuration](https://github.com/Lesords/vim-config)
 - tmux configuration and plugins
 - lazygit configuration
 - ranger configuration
 - vifm configuration
 - joshuto configuration
+- btop configuration
+- delta configuration
 - Some useful bash files
 
 # Installation
