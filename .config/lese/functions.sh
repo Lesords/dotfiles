@@ -36,14 +36,17 @@ function count() {
 }
 
 function init-proxy() {
-    LOCAL_DNS=$(cat /etc/resolv.conf | grep "nameserver" | cut -f 2 -d " ")
+    LOCAL_PORT=7890
 
-    if [ $# -eq 1 ]; then
+    if [ $# -ge 1 ]; then
         LOCAL_DNS=$1
+        if [ $# -eq 2 ]; then LOCAL_PORT=$2; fi
+    else
+        LOCAL_DNS=$(cat /etc/resolv.conf | grep "nameserver" | cut -f 2 -d " ")
     fi
 
-    export https_proxy="$LOCAL_DNS:7890"
-    export http_proxy="$LOCAL_DNS:7890"
+    export https_proxy="$LOCAL_DNS:$LOCAL_PORT"
+    export http_proxy="$LOCAL_DNS:$LOCAL_PORT"
     echo "init proxy successful"
 }
 
