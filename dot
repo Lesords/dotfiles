@@ -29,6 +29,12 @@ dotStatus()
         files=`find $dir -type f`
 
         for file in $files; do
+            if [ "$MSYSTEM" ]; then
+                if [[ "$file" != *"lese"* ]]; then
+                    continue
+                fi
+            fi
+
             [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && error=1 && continue
             res="`diff $file $HOME/$file`"
 
@@ -76,6 +82,12 @@ dotDiff()
         files=`find $dir -type f`
 
         for file in $files; do
+            if [ "$MSYSTEM" ]; then
+                if [[ "$file" != *"lese"* ]]; then
+                    continue
+                fi
+            fi
+
             [ ! -f "$HOME/$file" ] && echo -e "    \e[1;31mnonexistent:   $file\e[0m" && continue
             diffFile $file $HOME/$file
         done
