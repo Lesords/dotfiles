@@ -79,7 +79,7 @@ function rgd() {
 
 function del-self() {
     folder_name=$(basename "$PWD")
-    cd .. && rm -rf $folder_name
+    cd .. && rm -rf "$folder_name"
 }
 
 function show-url() {
