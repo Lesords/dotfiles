@@ -1,6 +1,8 @@
 #!/bin/bash
 
 alias reload='source ~/.profile'
+alias add-path='pwd >> ~/.cache/.path_bookmarks'
+alias edit-path='vim ~/.cache/.path_bookmarks'
 alias list="find . -maxdepth 1 -type d \( ! -name . \) -printf '%f\n'"
 alias fname='find -maxdepth 1 -type f -iname'
 alias git-init='source ~/.config/lese/git-init.sh'

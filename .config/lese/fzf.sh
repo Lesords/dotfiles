@@ -31,11 +31,22 @@ function rfa() {
         --bind 'enter:become(vim {1} +{2})'
 }
 
+fzf-cd() {
+    local file="${1:-$HOME/.cache/.path_bookmarks}"
+    [ ! -f "$file" ] && echo "路径文件不存在" && return 1
+
+    local target=$(fzf --height 40% --preview 'ls -lAh {}' < "$file")
+    cd "$target" 2>/dev/null || echo "无效路径: $target"
+}
+
 if type fzf >/dev/null 2>&1; then
     eval "$(fzf --bash)"
 
     alias fzf-vim="fzf --bind 'enter:become(vim {})'"
-    if [ -t 1 ]; then bind '"\C-f": "\C-ufzf-vim\C-m"'; fi
+    if [ -t 1 ]; then
+        bind '"\C-f": "\C-ufzf-vim\C-m"'
+        bind '"\eh": "\C-ufzf-cd\C-m"'
+    fi
 fi
 
 export FZF_DEFAULT_OPTS='
