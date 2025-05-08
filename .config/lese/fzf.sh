@@ -43,9 +43,13 @@ if type fzf >/dev/null 2>&1; then
     eval "$(fzf --bash)"
 
     alias fzf-vim="fzf --bind 'enter:become(vim {})'"
+    alias fzf-start="fzf --bind 'enter:become(start {})'"
     if [ -t 1 ]; then
         bind '"\C-f": "\C-ufzf-vim\C-m"'
         bind '"\eh": "\C-ufzf-cd\C-m"'
+        if [ "$MSYSTEM" ]; then
+            bind '"\ei": "\C-ufzf-start\C-m"'
+        fi
     fi
 fi
 
