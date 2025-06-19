@@ -86,7 +86,11 @@ function show-url() {
     urls=$(git remote -v | awk '{print $2}' | uniq | cut -d ':' -f 2)
     for url in $urls;
     do
-        echo "https://github.com/$url"
+        if [[ $url == //* ]]; then
+            echo "https:$url"
+        else
+            echo "https://github.com/$url"
+        fi
     done
 }
 
