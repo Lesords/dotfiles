@@ -103,6 +103,15 @@ dotInstall()
         rsync -av $dir $HOME
         [ $? == 0 ] && echo "$dir install done"
     done
+
+    echo && echo -e "Do you want to initialize the configuration? (y/n) \c" && read option
+    if [ "$option" == "n" ]; then
+        exit 0
+    fi
+
+    echo "" >> $HOME/.profile
+    echo "source \"\$HOME/.config/lese/init.sh\" --file" >> $HOME/.profile
+    echo "profile init successful"
 }
 
 if [ $# -lt 1 ]; then
