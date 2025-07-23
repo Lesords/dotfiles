@@ -4,7 +4,6 @@ This is my linux configuration
 
 Here's what I have configured so far:
 
-- [Vim configuration](https://github.com/Lesords/vim-config)
 - tmux configuration and plugins
 - lazygit configuration
 - ranger configuration
@@ -13,6 +12,8 @@ Here's what I have configured so far:
 - btop configuration
 - delta configuration
 - Some useful bash files
+
+Currently Vim is independent and not included in this repository, go to [here](https://github.com/Lesords/vim-config)
 
 # Installation
 
@@ -23,6 +24,9 @@ Clone the repository with the following command
 ```bash
 cd ~
 git clone git@github.com:Lesords/dotfiles.git --depth 1 --recurse-submodules --shallow-submodules
+
+# Or
+git clone https://github.com/Lesords/dotfiles.git --depth 1 --recurse-submodules --shallow-submodules
 ```
 
 Next, use the following command to move the configuration file to the user directory
@@ -54,6 +58,8 @@ Use the following command to automatically move all configuration files to the u
 ```bash
 cd ~
 git clone --bare git@github.com:Lesords/dotfiles.git --depth 1
+# Or
+git clone --bare https://github.com/Lesords/dotfiles.git --depth 1
 
 git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME checkout
 
