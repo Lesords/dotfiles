@@ -11,7 +11,7 @@ if [ -t 1 ]; then
     bind '";n": "\C-uclear -x\C-m"'
     bind '";u": "\C-udu -sh *\C-m"'
     bind '";l": "\C-ulsblk\C-m"'
-    bind '";s": "\C-ula | while IFS= read -r line; do echo && echo $line:; [[ \"$line\" == *\" \"* ]] && ls \"$line\" || ls $line; done\C-m"'
+    bind '";s": "\C-uls -A | while IFS= read -r line; do echo && echo $line:; [[ \"$line\" == *\" \"* ]] && ls \"$line\" || ls $line; done\C-m"'
     bind '";mt": "\C-usudo mount"'
     bind '";mr": "\C-usudo umount"'
     bind '";j": "\C-utmux at -t "'
