@@ -100,7 +100,11 @@ dotInstall()
 
     # Basic Configuration File
     for dir in ${list[@]}; do
-        rsync -av $dir $HOME
+        if type rsync >/dev/null 2>&1; then
+            rsync -av $dir $HOME
+        else
+            cp -rf $dir $HOME
+        fi
         [ $? == 0 ] && echo "$dir install done"
     done
 
