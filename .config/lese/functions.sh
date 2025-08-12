@@ -105,3 +105,38 @@ function gen-clang-config() {
         echo "clang-format does not exist"
     fi
 }
+
+function mihomo-start() {
+    mihomo_config_path="$HOME/.config/mihomo"
+    if [ ! -f "$mihomo_config_path/Country.mmdb" ]; then
+        echo "Error: Missing mmdb file"
+        return
+    fi
+
+    if [ ! -d $mihomo_config_path/profile ]; then
+        echo "Error: Missing profile file"
+        return
+    fi
+
+    if [ "$1" == "-l" ]; then
+        ls $mihomo_config_path/profile
+        return
+    fi
+
+    if [ -z "$1" ]; then
+        echo "Error: You need to specify the configuration file name"
+        return
+    fi
+
+    if [ ! -f "$mihomo_config_path/profile/$1" ]; then
+        echo "Error: $1 file does not exist"
+        echo "  Use the -l parameter to view all configuration file names"
+        return
+    fi
+
+    if type mihomo >/dev/null 2>&1; then
+        mihomo -d $mihomo_config_path -f $mihomo_config_path/profile/$1
+    else
+        echo "Error: mihomo does not exist"
+    fi
+}
