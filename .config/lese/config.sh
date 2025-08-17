@@ -30,6 +30,12 @@ alias get-gpg-key='gpg --armor --export `get-gpg-id`'
 alias get-my-tool='git clone https://github.com/Lesords/My-Linux-Tool.git --depth=1'
 alias get-my-vim='git clone https://github.com/Lesords/vim-config.git ~/.vim --depth 1 --recurse-submodules --shallow-submodules'
 
+if [ -z "$(alias | grep "la=")" ]; then
+    alias ll='ls -alF'
+    alias la='ls -A'
+    alias l='ls -CF'
+fi
+
 if [ -d "$HOME/.local/bin" ] && [ -z "$(echo "$PATH" | grep -i "\.local/bin")" ]; then
     PATH="$HOME/.local/bin:$PATH"
 fi
