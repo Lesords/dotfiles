@@ -36,18 +36,31 @@ function count() {
 }
 
 function init-proxy() {
+    HTTP_HEADER=""
     LOCAL_PORT=7890
+    LOCAL_DNS=$([ -f /etc/resolv.conf ] && cat /etc/resolv.conf | grep "nameserver" | cut -f 2 -d " ")
 
-    if [ $# -ge 1 ]; then
-        LOCAL_DNS=$1
-        if [ $# -eq 2 ]; then LOCAL_PORT=$2; fi
-    else
-        LOCAL_DNS=$(cat /etc/resolv.conf | grep "nameserver" | cut -f 2 -d " ")
-    fi
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -p)
+                shift
+                LOCAL_PORT=$1
+                ;;
+            -h)
+                HTTP_HEADER="http://"
+                ;;
+            *)
+                LOCAL_DNS=$1
+                ;;
+        esac
+        shift
+    done
 
-    export https_proxy="$LOCAL_DNS:$LOCAL_PORT"
-    export http_proxy="$LOCAL_DNS:$LOCAL_PORT"
+    export https_proxy="$HTTP_HEADER$LOCAL_DNS:$LOCAL_PORT"
+    export http_proxy="$HTTP_HEADER$LOCAL_DNS:$LOCAL_PORT"
     echo "init proxy successful"
+    echo "https_proxy=$https_proxy"
+    echo "http_proxy=$http_proxy"
 }
 
 function close-proxy() {
