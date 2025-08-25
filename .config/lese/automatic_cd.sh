@@ -53,6 +53,15 @@ vicd()
     cd "$dst" || echo "$dst"
 }
 
+# yazi
+function yazi-cd() {
+	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+	yazi "$@" --cwd-file="$tmp"
+	IFS= read -r -d '' cwd < "$tmp"
+	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
+	rm -f -- "$tmp"
+}
+
 
 
 if type ranger >/dev/null 2>&1; then
@@ -65,4 +74,8 @@ fi
 
 if type vifm >/dev/null 2>&1; then
     if [ -t 1 ]; then bind '"\eo": "\C-uvicd .\C-m"'; fi
+fi
+
+if type yazi >/dev/null 2>&1; then
+    if [ -t 1 ]; then bind '"\ey": "\C-uyazi-cd .\C-m"'; fi
 fi
