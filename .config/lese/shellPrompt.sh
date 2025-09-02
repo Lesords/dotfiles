@@ -46,3 +46,6 @@ fi
 
 # vifm prompt
 [ -n "$MYVIFMRC" ] && PS1="$PS1"'(in vifm) '
+
+# yazi prompt
+[ -n "$YAZI_LEVEL" ] && PS1="$PS1"'(in yazi) '

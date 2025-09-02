@@ -1,0 +1,6 @@
+[mgr]
+append_keymap = [
+    { on = "e", run = 'shell --block -- vim "$0"', desc = "Open with vim" },
+    { on = "i", run = 'shell --block -- bat "$0" -p --paging=always', desc = "View with bat" },
+    { on = "<C-o>", run = 'shell --block -- bash --login', desc = "Open new shell in yazi" },
+]
