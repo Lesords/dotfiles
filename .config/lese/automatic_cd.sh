@@ -77,5 +77,5 @@ if type vifm >/dev/null 2>&1; then
 fi
 
 if type yazi >/dev/null 2>&1; then
-    if [ -t 1 ]; then bind '"\ey": "\C-uyazi-cd .\C-m"'; fi
+    if [ -t 1 ]; then bind '"\ei": "\C-uyazi-cd .\C-m"'; fi
 fi
