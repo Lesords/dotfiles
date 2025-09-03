@@ -47,3 +47,8 @@ fi
 export GPG_TTY=$(tty)
 
 export LD_LIBRARY_PATH="$HOME/.local/lib"
+
+if type zoxide >/dev/null 2>&1; then
+    export _ZO_DOCTOR=0
+    eval "$(zoxide init bash)"
+fi

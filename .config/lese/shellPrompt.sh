@@ -49,3 +49,8 @@ fi
 
 # yazi prompt
 [ -n "$YAZI_LEVEL" ] && PS1="$PS1"'(in yazi) '
+
+# zoxide command
+if type zoxide >/dev/null 2>&1; then
+    PROMPT_COMMAND="__zoxide_hook;${PROMPT_COMMAND#;}"
+fi
