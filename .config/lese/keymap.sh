@@ -6,12 +6,12 @@ if [ -t 1 ]; then
         bind '";t": "\C-utree -L 2 -a .\C-m"'
     fi
     if [[ "`uname -r | grep WSL`" || "$MSYSTEM" ]]; then
-        bind '";o": "\C-uexplorer.exe .\C-m"'
+        bind -x '";o": "explorer.exe ."'
     fi
-    bind '";n": "\C-uclear -x\C-m"'
+    bind -x '";n": "clear -x"'
     bind '";u": "\C-udu -sh *\C-m"'
     bind '";l": "\C-ulsblk\C-m"'
-    bind '";s": "\C-uls -A | while IFS= read -r line; do echo && echo $line:; [[ \"$line\" == *\" \"* ]] && ls \"$line\" || ls $line; done\C-m"'
+    bind '";s": "\C-uls -A | while IFS= read -r line; do echo && (if [ -d \"$line\" ]; then echo \"$line\": && ls \"$line\"; else echo \"$line\"; fi); done\C-m"'
     bind '";mt": "\C-usudo mount"'
     bind '";mr": "\C-usudo umount"'
     bind '";j": "\C-utmux at -t "'
