@@ -26,6 +26,7 @@ alias kill-gpg='gpgconf --kill all'
 alias gen-gpg='gpg --full-generate-key'
 alias get-gpg-id='gpg --list-secret-keys --keyid-format=long 2> /dev/null | grep "sec" | cut -d "/" -f 2 | cut -d " " -f 1'
 alias get-gpg-key='gpg --armor --export `get-gpg-id`'
+alias get_wsl_ip='wsl hostname -I'
 
 alias get-my-tool='git clone https://github.com/Lesords/My-Linux-Tool.git --depth=1'
 alias get-my-vim='git clone https://github.com/Lesords/vim-config.git ~/.vim --depth 1 --recurse-submodules --shallow-submodules'

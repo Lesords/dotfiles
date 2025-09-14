@@ -153,3 +153,61 @@ function mihomo-start() {
         echo "Error: mihomo does not exist"
     fi
 }
+
+function port_proxy() {
+    ADDRESS=""
+    LISTEN_PORT=""
+    CONNECT_PORT=""
+
+    if ! type netsh >/dev/null 2>&1; then
+        echo "Error: netsh command not found"
+        return
+    fi
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -a)
+                netsh interface portproxy show all
+                return
+                ;;
+            -p)
+                shift
+                if [[ "$1" == *:* ]]; then
+                    LISTEN_PORT=$(echo $1 | cut -d : -f 1)
+                    CONNECT_PORT=$(echo $1 | cut -d : -f 2)
+                else
+                    LISTEN_PORT=$1
+                    CONNECT_PORT=$1
+                fi
+                ;;
+            -d)
+                shift
+                netsh interface portproxy delete v4tov4 listenport=$1
+                [ $? == 0 ] && echo "Delete $1 successful"
+                return;
+                ;;
+            *)
+                ADDRESS=$1
+                ;;
+        esac
+        shift
+    done
+
+    if [ -z "$ADDRESS" ]; then
+        echo "Error: missing address"
+        return
+    fi
+
+    if [ -z "$LISTEN_PORT" ]; then
+        echo "Error: missing listen port"
+        return
+    fi
+
+    if [ -z "$CONNECT_PORT" ]; then
+        echo "Error: missing listen port"
+        return
+    fi
+
+    netsh interface portproxy add v4tov4 listenport=$LISTEN_PORT connectaddress=$ADDRESS connectport=$CONNECT_PORT
+    [ $? == 0 ] && echo "Port proxy add successfully [$LISTEN_PORT -> $ADDRESS:$CONNECT_PORT]"
+}
