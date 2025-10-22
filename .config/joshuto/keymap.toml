@@ -14,7 +14,7 @@ keymap = [
 
   { keys = ["o"], commands = ["shell vim %s"] },
   { keys = ["v", "v"], commands = ["shell bat %s --paging=always"] },
-  { keys = ["v", "p"], commands = ["shell bat %s --color always -p"] },
+  { keys = ["v", "p"], commands = ["shell bat %s --color always -p --paging=always"] },
   { keys = ["v", "n"], commands = ["shell bat %s --color always -p -n --paging=always"] },
 
   { keys = ["R"], commands = ["reload_dirlist"] },
