@@ -50,7 +50,7 @@ dotStatus()
     cd $HOME
     if [ -d ${list[0]} ]; then
         for dir in ${list[0]}/*; do
-            if [ ! -d $dotpath/$dir ]; then
+            if [ ! -d "$dotpath/$dir" ]; then
                 [ $track == 0 ] && track=1 && echo && echo "Untracked configuration:"
                 echo -e "\e[1;31m    $dir\e[0;37m"
             fi
