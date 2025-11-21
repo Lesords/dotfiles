@@ -41,6 +41,9 @@ else
     PS1='${debian_chroot:+($debian_chroot)}'"$BLUE\u$WHITE@$YELLOW\h $BLUE\w$WHITE"'`git_branch`\n> '
 fi
 
+# server
+[ -n "$SSH_CONNECTION" ] && PS1='[server] '"$PS1"
+
 # ranger prompt
 [ -n "$RANGER_LEVEL" ] && PS1="$PS1"'(in ranger) '
 
