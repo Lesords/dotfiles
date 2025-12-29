@@ -39,6 +39,10 @@ fzf-cd() {
     cd "$target" 2>/dev/null || echo "无效路径: $target"
 }
 
+function fd-vim() {
+    fd $1 | fzf --bind 'enter:become(vim {})'
+}
+
 if type fzf >/dev/null 2>&1; then
     eval "$(fzf --bash)"
 
