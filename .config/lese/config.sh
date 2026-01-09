@@ -17,6 +17,7 @@ alias gsub-clone='git clone --depth 1 --recurse-submodules --shallow-submodules'
 alias gsub-init='git submodule update --init --recursive --depth 1'
 alias git-count='git log --pretty=tformat: --numstat | gawk '"'"'{ add += $1 ; subs += $2 ; loc += $1 - $2 } END { printf "增加的行数:%s 删除的行数:%s 总行数: %s\n",add,subs,loc }'"'"''
 alias slow='less --tabs=4 -RFX'
+alias no-blank="grep -v '^$'"
 alias diff-better='diff-so-fancy | slow'
 
 alias sshmv='ssh-keygen -R '
