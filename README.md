@@ -65,3 +65,27 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME checkout
 
 git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --recursive --depth 1
 ```
+
+# Keymaps
+
+## tmux
+
+| Mode   | Shortcut Keys | Action             |
+| ------ | ------------- | ------------------ |
+| Normal | Ctrl + h      | Go to left panel   |
+| Normal | Ctrl + j      | Go to down panel   |
+| Normal | Ctrl + k      | Go to up panel     |
+| Normal | Ctrl + l      | Go to right panel  |
+| Normal | Prefix + Tab  | Open extrakto      |
+| Normal | Prefix + Ctrl + s  | Save Tmux environment      |
+| Normal | Prefix + Ctrl + r  | Restore Tmux environment   |
+| Normal | Prefix + /         | Search with regex                        |
+| Normal | Prefix + Ctrl + f  | Search simple file                       |
+| Normal | Prefix + Ctrl + g  | Jumping over git status files            |
+| Normal | Prefix + Alt + h   | Jumping over SHA-1/SHA-256 hashes        |
+| Normal | Prefix + Ctrl + u  | Search url (http, ftp and git urls)      |
+| Normal | Prefix + Ctrl + d  | Search number (mnemonic d, as digit)     |
+| Normal | Prefix + Alt + i   | Search ip address                        |
+| Copy   | o             | Open a highlighted selection with the system default program                           |
+| Copy   | Ctrl + o      | Open a highlighted selection with the $EDITOR                                          |
+| Copy   | Shift + s     | Search the highlighted selection directly inside a search engine (defaults to google)  |
