@@ -30,7 +30,11 @@ function open_in_vim_tab() {
     if [ "$count" -eq 1 ]; then
         pane_id="$panes"
     elif [ "$count" -gt 1 ]; then
-        tmux split-window "echo \"$panes\" | fzf --no-preview --prompt='Select vim pane> ' > $TMPFILE"
+        if tmux list-commands | grep -q '^display-popup' ; then
+            tmux popup -E -w 60% -h 40% "echo \"$panes\" | fzf --no-preview --prompt='Select vim pane> ' > $TMPFILE"
+        else
+            tmux split-window "echo \"$panes\" | fzf --no-preview --prompt='Select vim pane> ' > $TMPFILE"
+        fi
 
         timeout=30
         while [ ! -s "$TMPFILE" ] && [ $timeout -gt 0 ]; do
