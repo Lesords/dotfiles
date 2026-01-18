@@ -71,7 +71,7 @@ function open_in_vim_tab() {
         )
         if [ -n "$pane_id" ]; then
             path=$(tmux display-message -p "#{pane_current_path}")
-            tmux send-keys -t "$pane_id" "cd \"$path\" && vim \"+call cursor($line,$col)\" $file" Enter
+            tmux send-keys -t "$pane_id" C-u "cd \"$path\" && vim \"+call cursor($line,$col)\" $file" Enter
         else
             tmux split-window -c "#{pane_current_path}" -h \
                 "vim +\"call cursor($line,$col)\" \"$file\""
