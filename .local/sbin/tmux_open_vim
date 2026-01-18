@@ -61,8 +61,17 @@ function open_in_vim_tab() {
             ":tabedit +call\ cursor($line,$col) $file" Enter
     else
         # 没有 vim → 新 split-pane 启动 vim
-        tmux split-window -c "#{pane_current_path}" -h \
-            "vim +\"call cursor($line,$col)\" \"$file\""
+        pane_id=$(
+            tmux list-panes -F '#{pane_index} #{pane_current_command}' \
+                | awk '$2 ~ /^(bash|zsh|sh|fish)$/{print $1}' | head -1
+        )
+        if [ -n "$pane_id" ]; then
+            path=$(tmux display-message -p "#{pane_current_path}")
+            tmux send-keys -t "$pane_id" "cd \"$path\" && vim \"+call cursor($line,$col)\" $file" Enter
+        else
+            tmux split-window -c "#{pane_current_path}" -h \
+                "vim +\"call cursor($line,$col)\" \"$file\""
+        fi
     fi
 }
 
