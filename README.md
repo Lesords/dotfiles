@@ -89,3 +89,4 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Copy   | o             | Open a highlighted selection with the system default program                           |
 | Copy   | Ctrl + o      | Open a highlighted selection with the $EDITOR                                          |
 | Copy   | Shift + s     | Search the highlighted selection directly inside a search engine (defaults to google)  |
+| Copy   | r             | Open the current file in another panel using vim  |

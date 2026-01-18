@@ -1,0 +1,82 @@
+#!/bin/bash
+
+function open_in_vim_tab() {
+    local file="$1"
+    local line="${2:-1}"
+    local col="${3:-1}"
+
+    [ -z "$file" ] && {
+        echo "usage: open_in_vim_tab <file> [line] [col]" >&2
+        return 1
+    }
+
+    [ -z "$TMUX" ] && {
+        vim +"call cursor($line,$col)" "$file"
+        return
+    }
+
+    # 找当前 window 中的 vim pane
+    local panes
+    panes=$(
+        tmux list-panes -F '#{pane_index} #{pane_current_command}' \
+            | awk '$2 ~ /^(vim|nvim|vi|view)$/{print $1}'
+    )
+
+    TMPFILE=$(mktemp)
+    local count
+    local pane_id
+
+    count=$(echo "$panes" | wc -l)
+    if [ "$count" -eq 1 ]; then
+        pane_id="$panes"
+    elif [ "$count" -gt 1 ]; then
+        tmux split-window "echo \"$panes\" | fzf --no-preview --prompt='Select vim pane> ' > $TMPFILE"
+
+        timeout=30
+        while [ ! -s "$TMPFILE" ] && [ $timeout -gt 0 ]; do
+            sleep 0.2
+            ((timeout--))
+        done
+
+        if [ ! -s "$TMPFILE" ]; then
+            echo "No selection made or timeout."
+            rm -f "$TMPFILE"
+            exit 1
+        fi
+
+        pane_id=$(cat "$TMPFILE")
+        rm -f "$TMPFILE"
+
+        [ -z "$pane_id" ] && {
+            echo "No pane selected." >&2
+            return 1
+        }
+    else
+        pane_id=""
+    fi
+
+    if [ -n "$pane_id" ]; then
+        # 复用已有 vim，新 tab 打开
+        tmux send-keys -t "$pane_id" Escape \
+            ":tabedit +call\ cursor($line,$col) $file" Enter
+    else
+        # 没有 vim → 新 split-pane 启动 vim
+        tmux split-window -c "#{pane_current_path}" -h \
+            "vim +\"call cursor($line,$col)\" \"$file\""
+    fi
+}
+
+input=$(cat)
+# 从输入中用正则匹配文件路径和行号
+file=$(echo "$input" | grep -oE '([/a-zA-Z0-9._-]+):?[0-9]*' | head -1)
+
+[ -z "$file" ] && {
+    echo "No file path found in clipboard selection." >&2
+    exit 1
+}
+
+filepath=$(echo "$file" | cut -d':' -f1)
+lineno=$(echo "$file" | grep -oE ':[0-9]+' | tr -d ':')
+lineno=${lineno:-1}
+
+open_in_vim_tab "$filepath" "$lineno"
