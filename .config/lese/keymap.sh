@@ -10,7 +10,7 @@ if [ -t 1 ]; then
     fi
     if [[ "`uname | grep -i Linux`" ]]; then
         if type dolphin >/dev/null 2>&1; then
-            bind -x '";o": "dolphin ."'
+            bind -x '";o": "dolphin . &"'
         fi
     fi
     bind -x '";n": "clear -x"'
