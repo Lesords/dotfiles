@@ -45,6 +45,11 @@ dotStatus()
         done
     done
 
+    if [ "$1" != "-a" ]; then
+        [ $flag == 0 -a $error == 0 ] && echo "all same"
+        return
+    fi
+
     # Untracked Configuration File
     track=0
     cd $HOME
@@ -125,7 +130,7 @@ fi
 
 case $1 in
     status)
-        dotStatus
+        dotStatus $2
         ;;
     diff)
         dotDiff $2
