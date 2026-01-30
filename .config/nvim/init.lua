@@ -60,6 +60,15 @@ require('blink.cmp').setup({
         preset = "default",
         ["<S-Tab>"] = { "select_prev", "fallback" },
         ["<Tab>"] = { "select_next", "fallback" },
+        ["<C-k>"] = { "show", "show_documentation", "hide_documentation" },
+    },
+    cmdline = {
+        enabled = true,
+        completion = { menu = { auto_show = true } },
+        keymap = {
+            preset = "cmdline",
+            ["<CR>"] = { "select_accept_and_enter", "fallback" },
+        },
     },
     appearance = {
         nerd_font_variant = 'mono'
@@ -71,7 +80,7 @@ require('blink.cmp').setup({
         },
         documentation = {
             auto_show = true,
-            auto_show_delay_ms = 500,
+            auto_show_delay_ms = 100,
             treesitter_highlighting = true,
             window = {
                 border = 'rounded',
@@ -79,11 +88,11 @@ require('blink.cmp').setup({
         }
     },
     sources = {
+        default = { 'lsp', 'path', 'snippets', 'buffer', 'copilot' },
         per_filetype = {
             -- Add the copilot-chat source for relevant filetype
             ["copilot-chat"] = { "copilotchat" },
         },
-        default = { 'lsp', 'path', 'snippets', 'buffer', 'copilot' },
         providers = {
             path = {
                 -- Path sources triggered by "/" interfere with CopilotChat commands
