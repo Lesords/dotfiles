@@ -6,6 +6,10 @@ vim.cmd [[
     source ~/.vim/vimrc
 ]]
 
+-- vim-lsp
+vim.g.lsp_auto_enable = false
+vim.keymap.set("n", "<leader>lp", ":call lsp#enable()<CR>", { noremap = true, silent = true })
+
 -- CopilotChat
 vim.api.nvim_set_hl(0, 'CopilotChatHeader', { fg = '#7C3AED', bold = true })
 vim.api.nvim_set_hl(0, 'CopilotChatSeparator', { fg = '#374151' })
