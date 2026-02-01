@@ -138,6 +138,13 @@ require('blink.cmp').setup({
     }
 })
 
+-- mini.indentscope
+vim.cmd('hi! link MiniIndentscopeSymbol GruvboxBlue')
+require('mini.indentscope').setup({
+    symbol = "│",
+})
+
+-- nvim-ufo
 vim.o.foldlevel = 99
 vim.o.foldlevelstart = 99
 local ftMap = {
