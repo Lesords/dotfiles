@@ -10,25 +10,38 @@ vim.cmd [[
 vim.g.lsp_auto_enable = false
 vim.keymap.set("n", "<leader>lp", ":call lsp#enable()<CR>", { noremap = true, silent = true })
 
+-- mini.pick
+require('mini.pick').setup()
+vim.ui.select = require('mini.pick').ui_select
+
 -- CopilotChat
 vim.api.nvim_set_hl(0, 'CopilotChatHeader', { fg = '#7C3AED', bold = true })
 vim.api.nvim_set_hl(0, 'CopilotChatSeparator', { fg = '#374151' })
 
 vim.keymap.set("n", "<leader>ct", ":CopilotChatToggle<CR>", { noremap = true, silent = true })
 
+vim.api.nvim_create_autocmd("BufEnter", {
+    pattern = "copilot-chat",
+    callback = function()
+        vim.opt_local.relativenumber = false
+        vim.opt_local.number = true
+        vim.opt_local.signcolumn = "no"
+    end,
+})
+
 require("CopilotChat").setup({
     model = 'claude-sonnet-4.5',
     -- model = "gemini-3-pro-preview",
 
-    highlight_headers = true,
+    highlight_headers = false,
     error_header = '> [!ERROR] Error',
     temperature = 0.1,           -- Lower = focused, higher = creative
     chat_autocomplete = false,
 
     headers = {
-        user = ' ━ 👤 You',
-        assistant = ' ━ 🤖 Copilot',
-        tool = ' ━ 🔧 Tool',
+        user = '👤 You',
+        assistant = '🤖 Copilot',
+        tool = '🔧 Tool',
     },
 
     window = {
