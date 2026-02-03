@@ -79,8 +79,7 @@ vim.api.nvim_set_hl(0, "Pmenu", { bg = "#282828", fg= "#928374" })
 require('blink.cmp').setup({
     keymap = {
         preset = "default",
-        ["<S-Tab>"] = { "select_prev", "fallback" },
-        ["<Tab>"] = { "select_next", "fallback" },
+        ["<Tab>"] = { "accept", "fallback" },
         ["<C-k>"] = { "show", "show_documentation", "hide_documentation" },
     },
     cmdline = {
@@ -88,6 +87,7 @@ require('blink.cmp').setup({
         completion = { menu = { auto_show = true } },
         keymap = {
             preset = "cmdline",
+            ["<Tab>"] = { "accept", "fallback" },
             ["<CR>"] = { "select_accept_and_enter", "fallback" },
         },
     },
