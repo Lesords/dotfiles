@@ -21,6 +21,9 @@ vim.keymap.set("n", "<leader>lp", ":call lsp#enable()<CR>", { noremap = true, si
 -- mini.pick
 require('mini.pick').setup()
 vim.ui.select = require('mini.pick').ui_select
+vim.keymap.set("n", "<space>ff", ":Pick files<CR>", { noremap = true, silent = true })
+vim.keymap.set("n", "<space>fs", ":Pick grep<CR>", { noremap = true, silent = true })
+vim.keymap.set("n", "<space>fl", ":Pick grep_live<CR>", { noremap = true, silent = true })
 
 -- CopilotChat
 vim.api.nvim_set_hl(0, 'CopilotChatHeader', { fg = '#7C3AED', bold = true })
@@ -142,6 +145,16 @@ require('blink.cmp').setup({
 vim.cmd('hi! link MiniIndentscopeSymbol GruvboxBlue')
 require('mini.indentscope').setup({
     symbol = "│",
+})
+local disabled_filetypes = { 'help', 'man', 'fern', 'startify', 'copilot-chat' }
+vim.api.nvim_create_autocmd('FileType', {
+    group = vim.api.nvim_create_augroup('MiniIndentScopeDisable', { clear = true }),
+    callback = function(opts)
+        local ftype = vim.bo[opts.buf].filetype
+        if vim.tbl_contains(disabled_filetypes, ftype) then
+            vim.b.miniindentscope_disable = true
+        end
+    end,
 })
 
 -- nvim-ufo
