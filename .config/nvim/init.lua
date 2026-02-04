@@ -157,6 +157,39 @@ vim.api.nvim_create_autocmd('FileType', {
     end,
 })
 
+-- codecompanion
+require("codecompanion").setup({
+    interactions = {
+        chat = {
+            -- You can specify an adapter by name and model (both ACP and HTTP)
+            adapter = {
+                name = "copilot",
+                model = "gemini-3-pro-preview",
+            },
+            roles = {
+                llm = function(adapter)
+                    local model_name = ''
+                    if adapter.schema and adapter.schema.model and adapter.schema.model.default then
+                        local model = adapter.schema.model.default
+                        if type(model) == 'function' then
+                            model = model(adapter)
+                        end
+                        model_name = '(' .. model .. ')'
+                    end
+                    return '🤖 ' .. adapter.formatted_name .. model_name
+                end,
+                user = ' User',
+            },
+        },
+    },
+    opts = {
+        log_level = "DEBUG",
+    },
+    extensions = {
+        spinner = {},
+    },
+})
+
 -- nvim-ufo
 vim.o.foldlevel = 99
 vim.o.foldlevelstart = 99
