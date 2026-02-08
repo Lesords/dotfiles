@@ -1,4 +1,5 @@
 vim.opt.splitright = true
+vim.opt.termguicolors = true
 
 if vim.env.WSL_DISTRO_NAME then
     vim.g.loaded_node_provider = 0
@@ -157,7 +158,27 @@ vim.api.nvim_create_autocmd('FileType', {
     end,
 })
 
+-- mini.diff
+vim.api.nvim_set_hl(0, "MiniDiffSignAdd", { fg = "#39FF14" })
+vim.api.nvim_set_hl(0, "MiniDiffSignChange", { fg = "#00BFFF" })
+vim.api.nvim_set_hl(0, "MiniDiffSignDelete", { fg = "#fb4934" })
+require('mini.diff').setup({
+    view = {
+        signs = {
+            add = "▎",
+            change = "▎",
+            delete = "▎",
+        },
+    },
+})
+
 -- codecompanion
+vim.keymap.set({ "n", "v" }, "<space>a", "<cmd>CodeCompanionActions<cr>", { noremap = true, silent = true })
+vim.keymap.set({ "n", "v" }, "<space>c", "<cmd>CodeCompanionChat Toggle<cr>", { noremap = true, silent = true })
+vim.keymap.set("v", "ga", "<cmd>CodeCompanionChat Add<cr>", { noremap = true, silent = true })
+
+-- Expand 'cc' into 'CodeCompanion' in the command line
+vim.cmd([[cab cc CodeCompanion]])
 require("codecompanion").setup({
     interactions = {
         chat = {
@@ -180,10 +201,78 @@ require("codecompanion").setup({
                 end,
                 user = ' User',
             },
+            keymaps = {
+                stop = {
+                    modes = {
+                        n = "q",
+                        i = "<C-q>",
+                    },
+                },
+            },
+            slash_commands = {
+                ["file"] = {
+                    keymaps = {
+                        modes = {
+                            i = "<C-f>",
+                            n = { "<C-f>", "gf" },
+                        },
+                    },
+                    opts = {
+                        provider = "mini_pick",
+                    },
+                },
+            },
+            opts = {
+                prompt_decorator = function(message, adapter, context)
+                    return string.format([[<prompt>%s</prompt>]], message)
+                end,
+            },
+        },
+        inline = {
+            keymaps = {
+                accept_change = {
+                    modes = { n = "ga" },
+                },
+                reject_change = {
+                    modes = { n = "gr" },
+                },
+                always_accept = {
+                    modes = { n = "gA" },
+                },
+            },
+        },
+    },
+    display = {
+        chat = {
+            show_header_separator = true,
+        },
+        diff = {
+            enabled = true,
+            provider = mini_diff, -- inline|split|mini_diff
+        },
+    },
+    prompt_library = {
+        ["Explain Code"] = {
+            interaction = "chat",
+            description = "Explain how code works",
+            prompts = {
+                {
+                    role = "system",
+                    content = "You are an expert programmer who excels at explaining code clearly and concisely.",
+                },
+                {
+                    role = "user",
+                    content = function(context)
+                        local text = require("codecompanion.helpers.actions").get_code(context.start_line, context.end_line)
+                        return "Please explain the following code:\n\n```" .. context.filetype .. "\n" .. text .. "\n```"
+                    end,
+                },
+            },
         },
     },
     opts = {
         log_level = "DEBUG",
+        language = "Chinese",
     },
     extensions = {
         spinner = {},
