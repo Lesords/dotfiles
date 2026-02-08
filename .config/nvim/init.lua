@@ -15,6 +15,16 @@ vim.cmd [[
     source ~/.vim/vimrc
 ]]
 
+-- nvim-treesitter
+require("nvim-treesitter.configs").setup({
+	ensure_installed = { "lua", "markdown", "markdown_inline", "yaml" },
+    auto_install = false,
+    highlight = {
+        enable = true,
+        additional_vim_regex_highlighting = false,
+    },
+})
+
 -- vim-lsp
 vim.g.lsp_auto_enable = false
 vim.keymap.set("n", "<leader>lp", ":call lsp#enable()<CR>", { noremap = true, silent = true })
@@ -147,7 +157,7 @@ vim.cmd('hi! link MiniIndentscopeSymbol GruvboxBlue')
 require('mini.indentscope').setup({
     symbol = "│",
 })
-local disabled_filetypes = { 'help', 'man', 'fern', 'startify', 'copilot-chat' }
+local disabled_filetypes = { 'help', 'man', 'fern', 'startify', 'copilot-chat', 'codecompanion' }
 vim.api.nvim_create_autocmd('FileType', {
     group = vim.api.nvim_create_augroup('MiniIndentScopeDisable', { clear = true }),
     callback = function(opts)
@@ -179,6 +189,9 @@ vim.keymap.set("v", "ga", "<cmd>CodeCompanionChat Add<cr>", { noremap = true, si
 
 -- Expand 'cc' into 'CodeCompanion' in the command line
 vim.cmd([[cab cc CodeCompanion]])
+
+require("companion-notification").init()
+require('extmarks').setup()
 require("codecompanion").setup({
     interactions = {
         chat = {
