@@ -61,7 +61,7 @@ require("CopilotChat").setup({
     chat_autocomplete = false,
 
     headers = {
-        user = '👤 You',
+        user = ' You',
         assistant = '🤖 Copilot',
         tool = '🔧 Tool',
     },
@@ -155,7 +155,7 @@ require('blink.cmp').setup({
 -- mini.indentscope
 vim.cmd('hi! link MiniIndentscopeSymbol GruvboxBlue')
 require('mini.indentscope').setup({
-    symbol = "│",
+    symbol = "▎",
 })
 local disabled_filetypes = { 'help', 'man', 'fern', 'startify', 'copilot-chat', 'codecompanion' }
 vim.api.nvim_create_autocmd('FileType', {
@@ -212,7 +212,7 @@ require("codecompanion").setup({
                     end
                     return '🤖 ' .. adapter.formatted_name .. model_name
                 end,
-                user = ' User',
+                user = ' User',
             },
             keymaps = {
                 stop = {
