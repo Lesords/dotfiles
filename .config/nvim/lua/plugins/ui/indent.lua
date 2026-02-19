@@ -13,3 +13,16 @@ vim.api.nvim_create_autocmd('FileType', {
         end
     end,
 })
+
+-- indent-blankline
+require("ibl").setup({
+    scope = { enabled = false },
+})
+
+local hooks = require "ibl.hooks"
+hooks.register(hooks.type.ACTIVE, function(bufnr)
+    return vim.tbl_contains(
+        { "cpp", "c", "python", "lua", "vim" },
+        vim.api.nvim_get_option_value("filetype", { buf = bufnr })
+    )
+end)
