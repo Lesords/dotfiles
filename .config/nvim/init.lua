@@ -7,7 +7,8 @@ vim.cmd [[
 ]]
 
 require('plugins.codecompanion.codecompanion')
-require('plugins.copilotchat.copilotchat')
+require('plugins.copilot.copilotchat')
+require('plugins.copilot.copilot')
 require('plugins.lang.nvim-treesitter')
 require('plugins.lang.render-markdown')
 require('plugins.lsp.vim-lsp')

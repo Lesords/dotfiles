@@ -1,3 +1,8 @@
+-- Blink Copilot
+require('blink-copilot').setup({
+    debounce = 50,
+})
+
 -- Blink Cmp
 vim.api.nvim_set_hl(0, "NormalFloat", { bg = "#282828", fg= "#928374" })
 vim.api.nvim_set_hl(0, "Pmenu", { bg = "#282828", fg= "#928374" })
