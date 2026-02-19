@@ -3,7 +3,7 @@ local Message = require("noice.message")
 local Manager = require("noice.message.manager")
 local Router = require("noice.message.router")
 
-local ThrottleTime = 200
+local ThrottleTime = 100
 local M = {}
 
 M.handles = {}
