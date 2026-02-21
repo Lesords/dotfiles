@@ -6,6 +6,15 @@ vim.keymap.set("v", "ga", "<cmd>CodeCompanionChat Add<cr>", { noremap = true, si
 -- Expand 'cc' into 'CodeCompanion' in the command line
 vim.cmd([[cab cc CodeCompanion]])
 
+vim.api.nvim_create_autocmd("FileType", {
+    pattern = "codecompanion",
+    callback = function()
+        vim.opt_local.relativenumber = false
+        vim.opt_local.number = false
+        vim.opt_local.signcolumn = "no"
+    end,
+})
+
 require("plugins.codecompanion.notification").init()
 require('plugins.codecompanion.extmarks').setup()
 require("codecompanion").setup({

@@ -26,8 +26,46 @@ require("noice").setup({
                 cursorline = false,
             },
         },
+        -- 自定义 mini 视图，用于 LSP 进度通知
+        mini = {
+            backend = "mini",
+            relative = "editor",
+            align = "message-right",
+            timeout = 2000,
+            reverse = true,
+            focusable = false,
+            position = {
+                row = -2,
+                col = "100%",
+            },
+            size = {
+                width = "auto",
+                height = "auto",
+                max_height = 10,
+            },
+            border = {
+                style = "rounded",
+                padding = { 0, 1 },
+            },
+            zindex = 60,
+            win_options = {
+                winbar = "",
+                foldenable = false,
+                winblend = 30,
+                winhighlight = {
+                    Normal = "NoiceMini",
+                    IncSearch = "",
+                    CurSearch = "",
+                    Search = "",
+                    FloatBorder = "NoiceMiniBorder",
+                },
+            },
+        },
     },
     lsp = {
+        progress = {
+            view = "mini",
+        },
         -- override markdown rendering so that **cmp** and other plugins use **Treesitter**
         override = {
             ["vim.lsp.util.convert_input_to_markdown_lines"] = true,
