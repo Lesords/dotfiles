@@ -91,19 +91,30 @@ require("codecompanion").setup({
         },
     },
     prompt_library = {
-        ["Explain Code"] = {
-            interaction = "chat",
-            description = "Explain how code works",
-            prompts = {
-                {
-                    role = "system",
-                    content = "You are an expert programmer who excels at explaining code clearly and concisely.",
+        markdown = {
+            dirs = {
+                vim.fn.stdpath('config') .. '/lua/plugins/codecompanion/prompts',
+            },
+        },
+        ["Spell"] = {
+            interaction = "inline",
+            description = "Correct grammar and reformulate",
+            opts = {
+                is_default = false,
+                alias = "spell",
+                is_slash_cmd = true,
+                auto_submit = true,
+                modes = { "v" },
+                adapter = {
+                    name = "copilot",
+                    model = "gpt-4.1",
                 },
+            },
+            prompts = {
                 {
                     role = "user",
                     content = function(context)
-                        local text = require("codecompanion.helpers.actions").get_code(context.start_line, context.end_line)
-                        return "Please explain the following code:\n\n```" .. context.filetype .. "\n" .. text .. "\n```"
+                        return "Correct grammar and reformulate:\n\n" .. context.code .. "\n"
                     end,
                 },
             },
