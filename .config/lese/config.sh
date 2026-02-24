@@ -23,6 +23,7 @@ alias diff-better='diff-so-fancy | slow'
 alias sshmv='ssh-keygen -R '
 alias test-github='ssh -T git@github.com'
 alias gen-key='ssh-keygen -m PEM -t rsa -b 4096 -C' # with comment
+alias restart-gpg='gpgconf --kill gpg-agent && gpgconf --launch gpg-agent'
 alias kill-gpg='gpgconf --kill all'
 alias gen-gpg='gpg --full-generate-key'
 alias get-gpg-id='gpg --list-secret-keys --keyid-format=long 2> /dev/null | grep "sec" | cut -d "/" -f 2 | cut -d " " -f 1'
