@@ -57,7 +57,7 @@ require("codecompanion").setup({
                         },
                     },
                     opts = {
-                        provider = "mini_pick",
+                        provider = "telescope", -- min_pick
                     },
                 },
             },
