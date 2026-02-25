@@ -89,6 +89,9 @@ require("codecompanion").setup({
             enabled = true,
             provider = mini_diff, -- inline|split|mini_diff
         },
+        action_palette = {
+            provider = "default", -- or "telescope", "mini_pick", "snacks"
+        },
     },
     prompt_library = {
         markdown = {
