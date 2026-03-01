@@ -11,10 +11,4 @@ require("copilot").setup({
             dismiss = "<c-]>",
         },
     },
-    should_attach = function(_, bufname)
-        if string.match(bufname, "codecompanion") then
-            return false
-        end
-        return true
-    end,
 })
