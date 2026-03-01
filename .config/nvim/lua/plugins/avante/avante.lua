@@ -33,11 +33,12 @@ require('avante').setup({
     input = {
         provider = "native", -- "native" | "dressing" | "snacks"
     },
-    file_selector = {
-        provider = "telescope",
+    selector = {
+        provider = "telescope", -- "mini_pick"
     },
 })
 
 vim.keymap.set({ "n", "v" }, "<leader>aa", "<cmd>AvanteAsk<cr>", { noremap = true, silent = true, desc = "Avante Ask" })
 vim.keymap.set({ "n", "v" }, "<leader>ae", "<cmd>AvanteEdit<cr>", { noremap = true, silent = true, desc = "Avante Edit" })
 vim.keymap.set("n", "<leader>ar", "<cmd>AvanteRefresh<cr>", { noremap = true, silent = true, desc = "Avante Refresh" })
+vim.keymap.set("n", "<leader>at", "<cmd>AvanteToggle<cr>", { noremap = true, silent = true, desc = "Avante Toggle" })
