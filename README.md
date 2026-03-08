@@ -11,11 +11,22 @@ Here's what I have configured so far:
 - joshuto configuration
 - btop configuration
 - delta configuration
+- i3 configuration (feh rofi picom)
 - Some useful bash files
 
 Currently Vim is independent and not included in this repository, go to [here](https://github.com/Lesords/vim-config)
 
 # Installation
+
+## Dependencies
+
+```bash
+# i3 related tools
+sudo apt install i3 i3status i3lock dmenu i3blocks feh rofi picom -y
+
+# for nm-applet
+sudo apt install network-manager-gnome
+```
 
 ## Manual
 
