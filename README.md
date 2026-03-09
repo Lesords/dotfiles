@@ -26,6 +26,10 @@ sudo apt install i3 i3status i3lock dmenu i3blocks feh rofi picom -y
 
 # for nm-applet
 sudo apt install network-manager-gnome
+
+# rime
+sudo apt install fcitx5 fcitx5-rime fcitx5-chinese-addons fcitx5-configtool
+git clone --depth=1 https://github.com/iDvel/rime-ice.git ~/.local/share/fcitx5/rime
 ```
 
 ## Manual

@@ -189,6 +189,9 @@ exec_always feh --bg-fill /home/$USER/.config/i3/wallpaper.jpg
 # Picom
 exec --no-startup-id picom --config ~/.config/picom/picom.conf -b
 
+# rime
+exec --no-startup-id fcitx5
+
 # i3-gaps
 default_border pixel 0
 gaps inner 8
