@@ -172,6 +172,7 @@ bindsym $mod+r mode "resize"
 bar {
     status_command i3blocks -c /home/$USER/.config/i3blocks/i3blocks.conf
     position top
+    tray_output primary
     font pango:JetBrains Mono Nerd Font 10
     colors {
         background #1d1f21
