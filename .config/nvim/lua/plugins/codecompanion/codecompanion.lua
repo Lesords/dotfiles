@@ -43,7 +43,7 @@ require("codecompanion").setup({
             keymaps = {
                 stop = {
                     modes = {
-                        n = "q",
+                        n = "<C-q>",
                         i = "<C-q>",
                     },
                 },
@@ -132,8 +132,7 @@ require("codecompanion").setup({
             enabled = true,
             opts = {
                 -- Keymap to open history from chat buffer (default: gh)
-                -- keymap = "<C-h>",
-                keymap = "gh",
+                keymap = "<C-h>",
                 -- Keymap to save the current chat manually (when auto_save is disabled)
                 save_chat_keymap = "sc",
                 -- Save all chats by default (disable to save only manually using 'sc')
@@ -146,8 +145,8 @@ require("codecompanion").setup({
                 chat_filter = nil, -- function(chat_data) return boolean end
                 -- Customize picker keymaps (optional)
                 picker_keymaps = {
-                    rename = { n = "r", i = "<M-r>" },
-                    delete = { n = "d", i = "<M-d>" },
+                    rename = { n = "<M-r>", i = "<M-r>" },
+                    delete = { n = "<M-d>", i = "<M-d>" },
                     duplicate = { n = "<C-y>", i = "<C-y>" },
                 },
                 ---Automatically generate titles for new chats
