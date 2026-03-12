@@ -1,0 +1,36 @@
+#!/bin/bash
+
+direction="$1"
+
+# 获取当前焦点 workspace
+current_ws=$(i3-msg -t get_workspaces | jq -r '.[] | select(.focused==true) | .name')
+
+# 获取当前输出（显示器）
+current_output=$(i3-msg -t get_workspaces | jq -r '.[] | select(.focused==true) | .output')
+
+# 获取当前显示器上的 workspace
+mapfile -t ws_list < <(
+    i3-msg -t get_workspaces |
+    jq -r ".[] | select(.output==\"$current_output\") | .name" |
+    sort
+)
+
+# 找到当前 workspace 索引
+for i in "${!ws_list[@]}"; do
+    if [[ "${ws_list[$i]}" == "$current_ws" ]]; then
+        current_index=$i
+        break
+    fi
+done
+
+total=${#ws_list[@]}
+
+# 根据参数决定方向
+if [[ "$direction" == "prev" ]]; then
+    next_index=$(( (current_index - 1 + total) % total ))
+else
+    next_index=$(( (current_index + 1) % total ))
+fi
+
+# 切换 workspace
+i3-msg workspace "${ws_list[$next_index]}"
