@@ -202,3 +202,5 @@ gaps outer 1
 bindsym $mod+Tab workspace back_and_forth
 bindsym $mod+ctrl+Left workspace prev
 bindsym $mod+ctrl+Right workspace next
+bindsym $mod+bracketleft  exec --no-startup-id focus_output next
+bindsym $mod+bracketright exec --no-startup-id focus_output prev

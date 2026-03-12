@@ -1,0 +1,29 @@
+#!/bin/bash
+
+direction="$1"
+
+# 获取所有连接的显示器
+outputs=$(xrandr --query | grep " connected" | awk '{print $1}')
+
+# 获取当前焦点所在显示器
+current_output=$(i3-msg -t get_workspaces | jq -r '.[] | select(.focused==true) | .output')
+
+# 找到当前显示器索引
+for i in "${!outputs[@]}"; do
+    if [[ "${outputs[$i]}" == "$current_output" ]]; then
+        current_index=$i
+        break
+    fi
+done
+
+total=${#outputs[@]}
+
+if [[ "$direction" == "prev" ]]; then
+    next_index=$(( (current_index - 1 + total) % total ))
+else
+    next_index=$(( (current_index + 1) % total ))
+fi
+
+next_output=${outputs[$next_index]}
+
+i3-msg "focus output $next_output"
