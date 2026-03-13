@@ -198,6 +198,17 @@ default_border pixel 0
 gaps inner 8
 gaps outer 1
 
+# border size
+default_border pixel 6
+default_floating_border pixel 6
+
+# colors
+# class                 border  background text indicator child_border
+client.focused          #00bfff #00bfff #1e1e1e #00bfff #00bfff
+client.unfocused        #2a2a2a #2a2a2a #888888 #2a2a2a #2a2a2a
+client.focused_inactive #444444 #444444 #cccccc #444444 #444444
+client.urgent           #ff4444 #ff4444 #ffffff #ff4444 #ff4444
+
 # Switch workspace
 bindsym $mod+Tab workspace back_and_forth
 bindsym $mod+ctrl+Left workspace prev
