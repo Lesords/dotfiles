@@ -189,6 +189,9 @@ exec_always --no-startup-id $HOME/.config/polybar/launch.sh
 #     }
 # }
 
+# display monitor
+exec --no-startup-id display
+
 # Display Wallpaper
 exec_always feh --bg-fill /home/$USER/.config/i3/wallpaper.jpg
 
@@ -224,3 +227,14 @@ bindsym $mod+comma  exec --no-startup-id focus_output prev
 bindsym $mod+period exec --no-startup-id focus_output next
 bindsym $mod+shift+bracketleft  exec --no-startup-id workspace_cycle prev
 bindsym $mod+shift+bracketright exec --no-startup-id workspace_cycle next
+
+# monitor
+# main
+workspace 1 output DisplayPort-0
+workspace 2 output DisplayPort-0
+workspace 3 output DisplayPort-0
+
+# secondary
+workspace 4 output HDMI-A-0
+workspace 5 output HDMI-A-0
+workspace 6 output HDMI-A-0
