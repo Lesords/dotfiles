@@ -220,5 +220,7 @@ bindsym $mod+ctrl+Left workspace prev
 bindsym $mod+ctrl+Right workspace next
 bindsym $mod+bracketleft  exec --no-startup-id focus_output prev
 bindsym $mod+bracketright exec --no-startup-id focus_output next
+bindsym $mod+comma  exec --no-startup-id focus_output prev
+bindsym $mod+period exec --no-startup-id focus_output next
 bindsym $mod+shift+bracketleft  exec --no-startup-id workspace_cycle prev
 bindsym $mod+shift+bracketright exec --no-startup-id workspace_cycle next
