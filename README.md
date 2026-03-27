@@ -30,6 +30,9 @@ sudo apt install network-manager-gnome
 # rime
 sudo apt install fcitx5 fcitx5-rime fcitx5-chinese-addons fcitx5-configtool
 git clone --depth=1 https://github.com/iDvel/rime-ice.git ~/.local/share/fcitx5/rime
+
+# polkit
+sudo apt install policykit-1-gnome
 ```
 
 ## Manual
