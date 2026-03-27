@@ -1,5 +1,9 @@
 #!/bin/bash
 
-xrandr \
---output DisplayPort-0 --primary --mode 3840x2160 --pos 0x0 --rotate normal \
---output HDMI-A-0 --mode 3840x2160 --rotate normal --pos 3840x0
+COUNT=$(xrandr | grep -c " connected")
+
+if [ "$COUNT" -eq 2 ]; then
+    xrandr \
+        --output DisplayPort-0 --primary --mode 3840x2160 --pos 0x0 --rotate normal \
+        --output HDMI-A-0 --mode 3840x2160 --rotate normal --pos 3840x0
+fi
