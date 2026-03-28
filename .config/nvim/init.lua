@@ -1,10 +1,5 @@
 require('config.basic')
-
-vim.cmd [[
-    set runtimepath^=~/.vim runtimepath+=~/.vim/after
-    let &packpath = &runtimepath
-    source ~/.vim/vimrc
-]]
+require('config.plug')
 
 require('plugins.codecompanion.codecompanion')
 require('plugins.copilot.copilotchat')
