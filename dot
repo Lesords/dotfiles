@@ -13,14 +13,114 @@ printUsage()
     echo "OPTIONS:"
     echo "  install [--config]"
     echo "  diff    [--config]"
-    echo "  status"
+    echo "  status  [-a] [-l num]"
+}
+
+printTrackedUntracked()
+{
+    local dotpath=$1
+    local printed=$2
+    local found=0
+
+    cd "$HOME" || return 1
+
+    for dir in "${list[@]}"; do
+        [ -d "$dotpath/$dir" ] || continue
+
+        while IFS= read -r root; do
+            [ -e "$root" ] || continue
+            [ -d "$root" ] || continue
+
+            local missing_dirs=()
+
+            while IFS= read -r entry; do
+                local skip=0
+
+                for missing_dir in "${missing_dirs[@]}"; do
+                    if [[ "$entry" == "$missing_dir/"* ]]; then
+                        skip=1
+                        break
+                    fi
+                done
+
+                [ "$skip" == 1 ] && continue
+                [ -e "$dotpath/$entry" ] && continue
+
+                [ "$printed" == 0 ] && printed=1 && echo && echo "Untracked configuration:"
+                echo -e "\e[1;31m    $entry\e[0;37m"
+                found=1
+
+                if [ -d "$entry" ]; then
+                    missing_dirs+=("$entry")
+                fi
+            done < <(find "$root" -mindepth 1 | sort)
+        done < <(cd "$dotpath" && find "$dir" -mindepth 1 -maxdepth 1 -type d | sort)
+    done
+
+    return "$found"
+}
+
+printAllUntracked()
+{
+    local dotpath=$1
+    local printed=$2
+    local maxdepth=$3
+    local found=0
+
+    cd "$HOME" || return 1
+
+    for dir in "${list[@]}"; do
+        [ -d "$dir" ] || continue
+        [ -d "$dotpath/$dir" ] || continue
+
+        while IFS= read -r root; do
+            [ -e "$dotpath/$root" ] && continue
+
+            [ "$printed" == 0 ] && printed=1 && echo && echo "Untracked configuration:"
+            while IFS= read -r entry; do
+                echo -e "\e[1;31m    $entry\e[0;37m"
+            done < <(find "$root" -maxdepth "$maxdepth" | sort)
+            found=1
+        done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d | sort)
+    done
+
+    return "$found"
 }
 
 dotStatus()
 {
+    local show_all=0
+    local level=3
     flag=0
     error=0
     dotpath=$PWD
+    track=0
+
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -a)
+                show_all=1
+                ;;
+            -l)
+                shift
+
+                if [ -z "$1" ] || [[ ! "$1" =~ ^[0-9]+$ ]]; then
+                    echo "error: -l requires a numeric depth" && echo
+                    printUsage
+                    return 2
+                fi
+
+                level=$1
+                ;;
+            *)
+                echo "error: wrong option" && echo
+                printUsage
+                return 2
+                ;;
+        esac
+
+        shift
+    done
 
     echo "Dot status"
 
@@ -45,21 +145,16 @@ dotStatus()
         done
     done
 
-    if [ "$1" != "-a" ]; then
-        [ $flag == 0 -a $error == 0 ] && echo "all same"
-        return
+    printTrackedUntracked "$dotpath" "$track"
+    if [ $? == 1 ]; then
+        track=1
     fi
 
-    # Untracked Configuration File
-    track=0
-    cd $HOME
-    if [ -d ${list[0]} ]; then
-        for dir in ${list[0]}/*; do
-            if [ ! -d "$dotpath/$dir" ]; then
-                [ $track == 0 ] && track=1 && echo && echo "Untracked configuration:"
-                echo -e "\e[1;31m    $dir\e[0;37m"
-            fi
-        done
+    if [ "$show_all" == 1 ]; then
+        printAllUntracked "$dotpath" "$track" "$level"
+        if [ $? == 1 ]; then
+            track=1
+        fi
     fi
 
     [ $flag == 0 -a $track == 0 -a $error == 0 ] && echo "all same"
@@ -130,7 +225,7 @@ fi
 
 case $1 in
     status)
-        dotStatus $2
+        dotStatus "${@:2}"
         ;;
     diff)
         dotDiff $2
