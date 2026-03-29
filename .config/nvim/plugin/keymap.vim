@@ -114,32 +114,6 @@ nnoremap <leader>[         :ContextToggleWindow<cr>
 autocmd FileType c,cpp,objc noremap  <silent> <leader>cf  :ClangFormat<CR>
 autocmd FileType c,cpp,objc vnoremap <silent> <leader>cf  :ClangFormat<CR>
 
-" Leaderf
-if has('python') || has('python3')
-    noremap <silent> <leader>ff  :<C-U><C-R>=printf("Leaderf file %s", "")<CR><CR>
-    noremap <silent> <leader>fb  :<C-U><C-R>=printf("Leaderf buffer %s", "")<CR><CR>
-    noremap <silent> <leader>fm  :<C-U><C-R>=printf("Leaderf mru %s", "")<CR><CR>
-    noremap <silent> <leader>fw  :<C-U><C-R>=printf("Leaderf window %s", "")<CR><CR>
-    noremap <silent> <leader>fl  :<C-U><C-R>=printf("Leaderf line --no-auto-preview %s", "")<CR><CR>
-
-    noremap <silent> <leader>fa  :<C-U><C-R>=printf("Leaderf! rg --all-buffers -F -e %s ", expand("<cword>"))<CR>
-    noremap <silent> <leader>fc  :<C-U><C-R>=printf("Leaderf! rg -F -e %s -g *.{h,c,cpp}", expand("<cword>"))<CR>
-    noremap <silent> <leader>fs  :<C-U><C-R>=printf("Leaderf! rg --stayOpen --no-auto-preview --left -F -e \"%s\"", input("Please enter: "))<CR>
-    noremap <silent> f         :<C-U><C-R>=printf("Leaderf! rg --no-auto-preview -F -e %s ", expand("<cword>"))<CR>
-    xnoremap <silent> gf         :<C-U><C-R>=printf("Leaderf! rg -F -e %s ", leaderf#Rg#visual())<CR>
-    xnoremap <silent> gp         :<C-U><C-R>=printf("Leaderf! file --input %s ", leaderf#Rg#visual())<CR><CR>
-    noremap  <silent> go         :<C-U>Leaderf! rg --recall<CR>
-
-    noremap <silent> <leader>fg  :Leaderf gtags --update<CR>
-    noremap <silent> <leader>fr  :<C-U><C-R>=printf("Leaderf! gtags -r %s --auto-jump", expand("<cword>"))<CR><CR>
-    noremap <silent> <leader>fd  :<C-U><C-R>=printf("Leaderf! gtags -d %s --auto-jump", expand("<cword>"))<CR><CR>
-    noremap <silent> <leader>fo  :<C-U><C-R>=printf("Leaderf! gtags --recall %s", "")<CR><CR>
-    noremap <silent> <leader>fn  :<C-U><C-R>=printf("Leaderf gtags --next %s", "")<CR><CR>
-    noremap <silent> <leader>fp  :<C-U><C-R>=printf("Leaderf gtags --previous %s", "")<CR><CR>
-
-    noremap <silent> <C-LeftMouse> :<C-U><C-R>=printf("Leaderf! gtags -d %s --auto-jump", expand("<cword>"))<CR><CR>
-endif
-
 nnoremap <silent> m      :call util#OpenFern()<CR>
 inoremap <silent> m      <C-o>:call util#OpenFern()<cr>
 noremap  <silent> p      :UndotreeToggle<cr>
@@ -149,14 +123,3 @@ noremap  <silent> n      :Vista!!<cr>
 inoremap <expr> <Tab>   pumvisible() ? "\<C-n>" : "\<Tab>"
 inoremap <expr> <S-Tab> pumvisible() ? "\<C-p>" : "\<S-Tab>"
 inoremap <expr> <cr>    pumvisible() ? asyncomplete#close_popup() : "\<cr>"
-
-if has('vim9script') && v:version >= 901
-    nnoremap <Space>ff <scriptcmd>vim9cmd scope#fuzzy#File()<cr>
-    nnoremap <Space>fs <scriptcmd>vim9cmd scope#fuzzy#Grep('rg --vimgrep --smart-case')<cr>
-    nnoremap <Space>fz :FuzzyFiles<CR>
-    nnoremap <Space>fl :FuzzyInBuffer<CR>
-endif
-
-if has('vim9script') && v:version >= 900
-  nnoremap <Space>cc :CopilotChatOpen<CR>
-endif
