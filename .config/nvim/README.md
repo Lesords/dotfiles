@@ -37,3 +37,20 @@ This is my nvim configuration
 | Normal/Visual | Space + a     | Open CodeCompanion actions |
 | Normal/Visual | Space + c     | Toggle CodeCompanion chat |
 | Visual | ga            | Add selected content to CodeCompanion chat  |
+
+## LSP / Outline
+
+| Mode   | Shortcut Keys | Action         |
+| ------ | ------------- | -------------- |
+| Normal | gd            | Go to definition |
+| Normal | gD            | Go to declaration |
+| Normal | gt            | Go to type definition |
+| Normal | gi            | Go to implementation |
+| Normal | gr            | Show references |
+| Normal | K             | Hover documentation |
+| Normal | ,rn           | Rename symbol |
+| Normal | ,ca           | Code action |
+| Normal | [g            | Previous diagnostic |
+| Normal | ]g            | Next diagnostic |
+| Normal | ,o            | Toggle Outline |
+| Normal | ,O            | Refresh Outline |
