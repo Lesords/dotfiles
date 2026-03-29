@@ -1,6 +1,5 @@
 vim.cmd [[
     let mapleader    = ","
-    let g:vim_lsp_enabled = 'yes'
 
     call plug#begin('~/.config/nvim/plugged')
         Plug 'morhetz/gruvbox'
@@ -32,13 +31,6 @@ vim.cmd [[
             Plug 'mhinz/vim-startify'
             Plug 'liuchengxu/vista.vim', { 'on': 'Vista!!' }
             Plug 'christoomey/vim-tmux-navigator'
-        endif
-
-        if ( g:vim_lsp_enabled == 'yes' )
-            Plug 'prabirshrestha/vim-lsp'
-            Plug 'mattn/vim-lsp-settings'
-            Plug 'prabirshrestha/asyncomplete.vim'
-            Plug 'prabirshrestha/asyncomplete-lsp.vim'
         endif
 
         Plug 'nvim-lua/plenary.nvim',
@@ -79,5 +71,4 @@ vim.cmd [[
     source ~/.vim/config/plugins/lightline.vim
     source ~/.vim/config/plugins/startify.vim
     source ~/.vim/config/plugins/vim-floaterm.vim
-    source ~/.vim/config/plugins/vim-lsp.vim
 ]]
