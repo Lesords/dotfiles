@@ -1,5 +1,4 @@
-vim.keymap.set('n', '<leader>o', '<cmd>Outline<CR>', { silent = true, desc = 'Toggle outline' })
-vim.keymap.set('n', '<leader>O', '<cmd>OutlineRefresh<CR>', { silent = true, desc = 'Refresh outline' })
+vim.keymap.set('n', '<M-u>', '<cmd>Outline<CR>', { silent = true, desc = 'Toggle outline' })
 
 require('outline').setup({
   outline_window = {
