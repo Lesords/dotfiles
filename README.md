@@ -86,6 +86,49 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 
 # Keymaps
 
+## i3
+
+| Shortcut Keys | Action             |
+| ------------- | ------------------ |
+| mod + return  | start a terminal   |
+| mod + d       | app launcher with rofi  |
+| mod + o       | window switch with rofi |
+| mod + p       | power menu with rofi    |
+| mod + shift + q | kill current window   |
+| mod + h       | focus left   |
+| mod + j       | focus down   |
+| mod + k       | focus up     |
+| mod + l       | focus right  |
+| mod + shift + h | move left   |
+| mod + shift + j | move down   |
+| mod + shift + k | move up     |
+| mod + shift + l | move right  |
+| mod + i | split in horizontal |
+| mod + u | split in vertical   |
+| mod + s | stacked layout   |
+| mod + t | tabbed layout    |
+| mod + w | toggle split     |
+| mod + z | fullscreen       |
+| mod + f | floating toggle  |
+| mod + space | mode toggle  |
+| mod + a | focus parent   |
+| mod + d | focus child    |
+| mod + shift + c | reload   |
+| mod + shift + r | restart  |
+| mod + shift + e | exit     |
+| mod + r | resize window  |
+| mod + num         | switch to num workspace |
+| mod + shift + num | move to num workspace   |
+| mod + tab         | switch workspace        |
+| mod + ctrl + left  | switch to previous workspace |
+| mod + ctrl + right | switch to next workspace     |
+| mod + [ | focus to previous monitor |
+| mod + ] | focus to next monitor     |
+| mod + , | focus to previous monitor |
+| mod + . | focus to next monitor     |
+| mod + { | switch to previous workspace(current monitor) |
+| mod + } | switch to next workspace(current monitor)     |
+
 ## tmux
 
 | Mode   | Shortcut Keys | Action             |
