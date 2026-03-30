@@ -152,6 +152,32 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Copy   | Shift + s     | Search the highlighted selection directly inside a search engine (defaults to google)  |
 | Copy   | r             | Open the current file in another panel using vim  |
 
+## Kitty
+
+| Shortcut Keys | Action              |
+| ------------- | ------------------- |
+| Ctrl + Shift + enter | New window   |
+| Ctrl + Shift + c | Copy to clipboard     |
+| Ctrl + Shift + v | Paste from clipboard  |
+| Ctrl + Shift + s | Paste from selection  |
+| Ctrl + Shift + l | Switch to next layout   |
+| Ctrl + Shift + n | Open another window     |
+| Ctrl + Shift + w | Close window      |
+| Ctrl + Shift + [ | Previous window   |
+| Ctrl + Shift + ] | Next window       |
+| Ctrl + Shift + b | Move window backward  |
+| Ctrl + Shift + f | Move window forward   |
+| Ctrl + Shift + t | New tab   |
+| Ctrl + Shift + q | Close tab |
+| Ctrl + Shift + left    | Previous tab |
+| Ctrl + Shift + right   | Next tab     |
+| Ctrl + Shift + ,       | Move tab backward |
+| Ctrl + Shift + .       | Move tab forward  |
+| Ctrl + Shift + Alt + t | Set tab title  |
+| Ctrl + Shift + g | View output of last command  |
+| Ctrl + Shift + e | Click URL with keyboard  |
+| Ctrl + Shift + u | Input unicode character  |
+
 ## Neovim
 
 [nvim](./.config/nvim/README.md)
