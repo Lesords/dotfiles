@@ -117,6 +117,8 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + shift + r | restart  |
 | mod + shift + e | exit     |
 | mod + r | resize window  |
+| mod + -         | move to scratchpad |
+| mod + shift + - | show scratchpad |
 | mod + num         | switch to num workspace |
 | mod + shift + num | move to num workspace   |
 | mod + tab         | switch workspace        |
