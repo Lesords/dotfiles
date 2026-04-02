@@ -43,6 +43,7 @@ bindsym $mod+Return exec i3-sensible-terminal
 
 # kill focused window
 bindsym $mod+Shift+q kill
+bindsym --whole-window $mod+button2 kill
 
 # start rofi (a program launcher)
 bindsym $mod+d exec --no-startup-id rofi -show drun   -theme /home/$USER/.config/rofi/mine.rasi
