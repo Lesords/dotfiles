@@ -8,13 +8,16 @@ if [ $# -lt 1 ]; then
 fi
 
 if [ "$1" == "--config" ]; then
-    is_init=`tail -3 ~/.profile | grep "config/lese/init.sh"`
+    CONFIG_FILE="$HOME/.profile"
+    [ ! -f "$HOME/.profile" ] && CONFIG_FILE="$HOME/.bash_profile"
+
+    is_init=`tail -3 "$CONFIG_FILE" | grep "config/lese/init.sh"`
 
     if [ "$is_init" ]; then
         echo "profile already initialized"
     else
-        echo "" >> $HOME/.profile
-        echo "source \"\$HOME/.config/lese/init.sh\" --file" >> $HOME/.profile
+        echo "" >> $CONFIG_FILE
+        echo "source \"\$HOME/.config/lese/init.sh\" --file" >> $CONFIG_FILE
         echo "profile init successful"
     fi
 
