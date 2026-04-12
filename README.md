@@ -33,6 +33,9 @@ git clone --depth=1 https://github.com/iDvel/rime-ice.git ~/.local/share/fcitx5/
 
 # polkit
 sudo apt install policykit-1-gnome
+
+# flameshot
+sudo apt install flameshot
 ```
 
 ## Manual
@@ -120,6 +123,8 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + r | resize window  |
 | mod + -         | move to scratchpad |
 | mod + shift + - | show scratchpad |
+| mod + shift + s | area screenshot |
+| Print           | full-screen screenshot |
 | mod + num         | switch to num workspace |
 | mod + shift + num | move to num workspace   |
 | mod + tab         | switch workspace        |

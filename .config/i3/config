@@ -41,6 +41,9 @@ exec --no-startup-id dunst
 # greenclip
 exec --no-startup-id greenclip daemon
 
+# flameshot
+exec --no-startup-id flameshot
+
 # Use Mouse+$mod to drag floating windows to their wanted position
 floating_modifier $mod
 
@@ -229,6 +232,10 @@ client.urgent           #ff4444 #ff4444 #ffffff #ff4444 #ff4444
 # scratchpad
 bindsym $mod+minus move scratchpad
 bindsym $mod+shift+minus scratchpad show
+
+# flameshot
+bindsym --release $mod+Shift+s exec flameshot gui
+bindsym --release Print exec flameshot full --clipboard
 
 # Switch workspace
 bindsym $mod+Tab workspace back_and_forth
