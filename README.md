@@ -93,6 +93,7 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + return  | start a terminal   |
 | mod + d       | app launcher with rofi  |
 | mod + o       | window switch with rofi |
+| mod + y       | greenclip with rofi |
 | mod + p       | power menu with rofi    |
 | mod + shift + q | kill current window   |
 | mod + h       | focus left   |
