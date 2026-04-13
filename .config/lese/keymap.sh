@@ -11,6 +11,10 @@ if [ -t 1 ]; then
     if [[ "`uname | grep -i Linux`" ]]; then
         if type dolphin >/dev/null 2>&1; then
             bind -x '";o": "dolphin . &"'
+        elif type nautilus >/dev/null 2>&1; then
+            bind -x '";o": "nautilus . &"'
+        elif type thunar >/dev/null 2>&1; then
+            bind -x '";o": "thunar . &"'
         fi
     fi
     bind -x '";n": "clear -x"'
