@@ -7,6 +7,58 @@ list=(
     '.tmux.conf'
 )
 
+# Load .gitignore patterns from current directory
+loadGitignore()
+{
+    IGNORE_PATTERNS=()
+    [ -f ".gitignore" ] || return
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// /}" ]] && continue
+        IGNORE_PATTERNS+=("$line")
+    done < ".gitignore"
+}
+
+# Wrapper for find that prunes gitignored directories during traversal
+# $1: base directory, remaining args: find expressions
+findFiltered()
+{
+    local base="$1"
+    shift
+
+    local global_args=()
+    local other_args=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -mindepth|-maxdepth)
+                global_args+=("$1" "$2")
+                shift 2
+                ;;
+            *)
+                other_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    local prune_expr=()
+    for pattern in "${IGNORE_PATTERNS[@]}"; do
+        local p="${pattern%/}"
+        [ -z "$p" ] && continue
+
+        if [[ "$p" == "$base/"* ]]; then
+            prune_expr+=(-path "$p" -prune -o)
+        fi
+    done
+
+    if [ ${#prune_expr[@]} -gt 0 ]; then
+        unset 'prune_expr[-1]'
+        find "$base" "${global_args[@]}" -not \( "${prune_expr[@]}" \) "${other_args[@]}"
+    else
+        find "$base" "${global_args[@]}" "${other_args[@]}"
+    fi
+}
+
 printUsage()
 {
     echo "Usage: dot [OPTION]"
@@ -53,8 +105,8 @@ printTrackedUntracked()
                 if [ -d "$entry" ]; then
                     missing_dirs+=("$entry")
                 fi
-            done < <(find "$root" -mindepth 1 | sort)
-        done < <(cd "$dotpath" && find "$dir" -mindepth 1 -maxdepth 1 -type d | sort)
+            done < <(findFiltered "$root" -mindepth 1 | sort)
+        done < <(cd "$dotpath" && findFiltered "$dir" -mindepth 1 -maxdepth 1 -type d | sort)
     done
 
     return "$found"
@@ -79,9 +131,9 @@ printAllUntracked()
             [ "$printed" == 0 ] && printed=1 && echo && echo "Untracked configuration:"
             while IFS= read -r entry; do
                 echo -e "\e[1;31m    $entry\e[0;37m"
-            done < <(find "$root" -maxdepth "$maxdepth" | sort)
+            done < <(findFiltered "$root" -maxdepth "$maxdepth" | sort)
             found=1
-        done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d | sort)
+        done < <(findFiltered "$dir" -mindepth 1 -maxdepth 1 -type d | sort)
     done
 
     return "$found"
@@ -124,9 +176,11 @@ dotStatus()
 
     echo "Dot status"
 
+    loadGitignore
+
     # Basic Configuration File
     for dir in ${list[@]}; do
-        files=`find $dir -type f`
+        files=`findFiltered $dir -type f`
 
         for file in $files; do
             if [ "$MSYSTEM" ]; then
@@ -177,9 +231,11 @@ dotDiff()
 {
     echo "Dot diff"
 
+    loadGitignore
+
     # Basic Configuration File
     for dir in ${list[@]}; do
-        files=`find $dir -type f`
+        files=`findFiltered $dir -type f`
 
         for file in $files; do
             if [ "$MSYSTEM" ]; then
