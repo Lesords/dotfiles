@@ -1,6 +1,6 @@
 #!/bin/bash
 
-alias reload='source ~/.profile'
+alias reload='[ -f ~/.bash_profile ] && source ~/.bash_profile || { [ -f ~/.profile ] && source ~/.profile; }'
 alias kitty='kitty -o remember_window_size=n -o initial_window_width=120c -o initial_window_height=36c'
 alias add-path='pwd >> ~/.cache/.path_bookmarks'
 alias edit-path='vim ~/.cache/.path_bookmarks'
