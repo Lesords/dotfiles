@@ -1,0 +1,33 @@
+#!/bin/bash
+
+MODE=$1
+
+# auto find device
+if [ -z "$2" ]; then
+    DEV=$(for d in /dev/video*; do
+        v4l2-ctl -d $d --all 2>/dev/null | grep -q "Video Capture" && echo $d && break
+    done)
+else
+    DEV=$2
+fi
+
+if [ -z "$DEV" ]; then
+    echo "No video capture device found"
+    exit 1
+fi
+
+echo "Using device: $DEV"
+
+if [ "$MODE" == "vlc" ]; then
+    vlc v4l2://$DEV:chroma=MJPG:width=1920:height=1080:fps=30
+
+elif [ "$MODE" == "ffplay" ]; then
+    ffplay -f v4l2 -input_format mjpeg -video_size 1920x1080 -framerate 30 $DEV
+
+elif [ "$MODE" == "auto" ]; then
+    ffplay -f v4l2 -input_format mjpeg -video_size 1920x1080 -framerate 30 $DEV \
+    || vlc v4l2://$DEV
+
+else
+    echo "Usage: $0 [vlc|ffplay|auto] [device]"
+fi
