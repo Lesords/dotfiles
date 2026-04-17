@@ -63,6 +63,10 @@ bindsym $mod+o exec --no-startup-id rofi -show window -theme /home/$USER/.config
 bindsym $mod+y exec --no-startup-id rofi -show clipboard -run-command '{cmd}' \
                     -modi "clipboard:greenclip print" -theme /home/$USER/.config/rofi/clip.rasi
 bindsym $mod+p exec --no-startup-id /home/$USER/.local/sbin/powermenu
+# scroll up
+bindsym --whole-window $mod+button4 exec --no-startup-id rofi -show drun   -theme /home/$USER/.config/rofi/mine.rasi
+# scroll down
+bindsym --whole-window $mod+button5 exec --no-startup-id rofi -show window -theme /home/$USER/.config/rofi/mine.rasi
 
 # change focus
 bindsym $mod+h focus left
@@ -233,6 +237,8 @@ client.urgent           #ff4444 #ff4444 #ffffff #ff4444 #ff4444
 # scratchpad
 bindsym $mod+minus move scratchpad
 bindsym $mod+shift+minus scratchpad show
+# wheel click
+bindsym --whole-window $mod+shift+button3 move scratchpad
 
 # flameshot
 bindsym --release $mod+Shift+s exec flameshot gui
@@ -261,4 +267,6 @@ workspace 5 output HDMI-A-0
 workspace 6 output HDMI-A-0
 
 for_window [class="dolphin"]            floating enable, resize set 900 600, move position center
+for_window [class="Thunar"]             floating enable, resize set 1200 1000, move position center
 for_window [class="org.gnome.Nautilus"] floating enable, resize set 900 600, move position center
+for_window [class="Clash-verge"]        floating enable, resize set 900 600, move position center
