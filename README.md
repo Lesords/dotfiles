@@ -112,40 +112,41 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 
 ## i3
 
-| Shortcut Keys | Action             |
-| ------------- | ------------------ |
-| mod + return  | start a terminal   |
-| mod + d       | app launcher with rofi  |
-| mod + o       | window switch with rofi |
-| mod + y       | greenclip with rofi |
-| mod + p       | power menu with rofi    |
-| mod + shift + q | kill current window   |
-| mod + h       | focus left   |
-| mod + j       | focus down   |
-| mod + k       | focus up     |
-| mod + l       | focus right  |
-| mod + shift + h | move left   |
-| mod + shift + j | move down   |
-| mod + shift + k | move up     |
-| mod + shift + l | move right  |
+| Shortcut Keys   | Action              |
+| --------------- | ------------------- |
+| mod + shift + q | kill current window |
+| mod + shift + c | reload              |
+| mod + shift + r | restart             |
+| mod + shift + e | exit                |
+| mod + -         | move to scratchpad  |
+| mod + shift + - | show scratchpad     |
 | mod + i | split in horizontal |
 | mod + u | split in vertical   |
-| mod + s | stacked layout   |
-| mod + t | tabbed layout    |
-| mod + w | toggle split     |
-| mod + z | fullscreen       |
-| mod + f | floating toggle  |
-| mod + space | mode toggle  |
-| mod + a | focus parent   |
-| mod + d | focus child    |
-| mod + shift + c | reload   |
-| mod + shift + r | restart  |
-| mod + shift + e | exit     |
-| mod + r | resize window  |
-| mod + -         | move to scratchpad |
-| mod + shift + - | show scratchpad |
-| mod + shift + s | area screenshot |
-| Print           | full-screen screenshot |
+| mod + s | stacked layout      |
+| mod + t | tabbed layout       |
+| mod + w | toggle split        |
+| mod + f | toggle floating     |
+| mod + a | focus parent        |
+| mod + d | focus child         |
+| mod + h         | focus left    |
+| mod + j         | focus down    |
+| mod + k         | focus up      |
+| mod + l         | focus right   |
+| mod + shift + h | move left     |
+| mod + shift + j | move down     |
+| mod + shift + k | move up       |
+| mod + shift + l | move right    |
+| mod + space     | toggle mode   |
+| mod + r         | resize window |
+| mod + z         | fullscreen    |
+| mod + return    | start a terminal        |
+| mod + e         | start thunar            |
+| mod + d         | app launcher with rofi  |
+| mod + o         | window switch with rofi |
+| mod + y         | greenclip with rofi     |
+| mod + p         | power menu with rofi    |
+| mod + shift + s | area screenshot         |
+| Print           | full-screen screenshot  |
 | mod + num         | switch to num workspace |
 | mod + shift + num | move to num workspace   |
 | mod + tab         | switch workspace        |
