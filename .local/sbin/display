@@ -3,7 +3,12 @@
 COUNT=$(xrandr | grep -c " connected")
 
 if [ "$COUNT" -eq 2 ]; then
-    xrandr \
-        --output DisplayPort-0 --primary --mode 3840x2160 --pos 0x0 --rotate normal \
-        --output HDMI-A-0 --mode 3840x2160 --rotate normal --pos 3840x0
+    if [ "$(hostname)" == "laptop" ]; then
+        xrandr --output eDP-1 --primary --auto
+        xrandr --output HDMI-1-0 --auto --below eDP-1
+    else
+        xrandr \
+            --output DisplayPort-0 --primary --mode 3840x2160 --pos 0x0 --rotate normal \
+            --output HDMI-A-0 --mode 3840x2160 --rotate normal --pos 3840x0
+    fi
 fi
