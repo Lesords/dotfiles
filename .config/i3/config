@@ -11,7 +11,7 @@
 
 # Mod4 - Windows
 # Mod1 - Alt
-set $mod Mod1
+set $mod Mod4
 
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
@@ -37,6 +37,7 @@ exec --no-startup-id display
 
 # polkit
 exec --no-startup-id /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1
+exec --no-startup-id /usr/libexec/lxqt-policykit-agent
 
 # dunst
 exec --no-startup-id dunst
@@ -52,6 +53,9 @@ floating_modifier $mod
 
 # start a terminal
 bindsym $mod+Return exec i3-sensible-terminal
+
+# file manager
+bindsym $mod+e exec thunar
 
 # kill focused window
 bindsym $mod+Shift+q kill
@@ -217,6 +221,9 @@ exec --no-startup-id picom --config ~/.config/picom/picom.conf -b
 
 # rime
 exec --no-startup-id fcitx5
+
+# ibus
+exec --no-startup-id ibus-daemon
 
 # i3-gaps
 default_border pixel 0
