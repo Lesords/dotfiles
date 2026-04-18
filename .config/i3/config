@@ -7,7 +7,7 @@
 set $mod Mod4
 
 # Font for window titles.
-font pango:monospace 8
+font pango:JetBrains Mono Nerd Font 10
 
 # xss-lock grabs a logind suspend inhibit lock and will use i3lock to lock the
 # screen before suspend. Use loginctl lock-session to lock your screen.
