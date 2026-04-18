@@ -20,9 +20,11 @@ Currently Vim is independent and not included in this repository, go to [here](h
 
 ## Dependencies
 
+Ubuntu
+
 ```bash
 # i3 related tools
-sudo apt install i3 i3status i3lock dmenu i3blocks feh rofi picom -y
+sudo apt install i3 i3status i3lock dmenu i3blocks feh rofi picom polybar -y
 
 # for nm-applet
 sudo apt install network-manager-gnome
@@ -36,6 +38,25 @@ sudo apt install policykit-1-gnome
 
 # flameshot
 sudo apt install flameshot
+```
+
+Fedora
+
+```bash
+# Xorg
+sudo dnf install xorg-x11-server-Xorg xorg-x11-xinit -y
+
+# i3 related tools
+sudo dnf install i3 i3lock feh rofi picom polybar -y
+
+# for nm-applet
+sudo dnf install network-manager-applet
+
+# polkit
+sudo dnf install lxqt-policykit -y
+
+# flameshot
+sudo dnf install flameshot -y
 ```
 
 ## Manual
