@@ -57,6 +57,9 @@ sudo dnf install lxqt-policykit -y
 
 # flameshot
 sudo dnf install flameshot -y
+
+# playerctl
+sudo dnf install playerctl
 ```
 
 ## Manual
