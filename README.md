@@ -123,6 +123,7 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + shift + e | exit                |
 | mod + -         | move to scratchpad  |
 | mod + shift + - | show scratchpad     |
+| mod + x         | toggle polybar      |
 | mod + i | split in horizontal |
 | mod + u | split in vertical   |
 | mod + s | stacked layout      |
