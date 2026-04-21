@@ -1,0 +1,32 @@
+#!/bin/bash
+
+json=$(i3-msg -t get_workspaces)
+
+primary_out=$(xrandr --query | awk '/ connected primary/ {print $1}')
+
+focused_out=$(echo "$json" | jq -r '.[] | select(.focused==true).output')
+
+# role 判断
+if [ "$focused_out" = "$primary_out" ]; then
+  start=1; end=3
+else
+  # 如果你只有两个屏幕，这里就是 secondary
+  # 如果多屏，可以再扩展 xrandr 判断
+  start=4; end=6
+fi
+
+# fallback
+max=$(echo "$json" | jq -r \
+  --arg out "$focused_out" \
+  --argjson start "$start" \
+  --argjson end "$end" '
+    map(select(.output==$out)) |
+    map(.num) |
+    map(select(. >= $start and . <= $end)) |
+    (max // ($start - 1))
+')
+
+if [ "$1" == "--move" ];then
+    i3-msg "move container to workspace number $((max + 1))"
+fi
+i3-msg workspace "$((max + 1))"
