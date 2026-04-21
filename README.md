@@ -156,12 +156,14 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + tab         | switch workspace        |
 | mod + ctrl + left  | switch to previous workspace |
 | mod + ctrl + right | switch to next workspace     |
-| mod + [ | focus to previous monitor |
-| mod + ] | focus to next monitor     |
 | mod + , | focus to previous monitor |
 | mod + . | focus to next monitor     |
-| mod + { | switch to previous workspace(current monitor) |
-| mod + } | switch to next workspace(current monitor)     |
+| mod + < | move container to previous monitor |
+| mod + > | move container to next monitor     |
+| mod + [ | switch to previous workspace(current monitor) |
+| mod + ] | switch to next workspace(current monitor)     |
+| mod + { | move container to previous workspace(current monitor) |
+| mod + } | move container to next workspace(current monitor)     |
 
 ## tmux
 

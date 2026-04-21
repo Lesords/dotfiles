@@ -25,5 +25,7 @@ else
 fi
 
 next_output=${outputs[$next_index]}
+next_workspace=$(i3-msg -t get_workspaces | jq -r ".[] | select(.visible==true and .output==\"${next_output}\") | \"\(.name)\"")
 
+i3-msg "move container to workspace number $next_workspace"
 i3-msg "focus output $next_output"
