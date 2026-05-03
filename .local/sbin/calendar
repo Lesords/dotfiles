@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+
+theme="$HOME/.config/rofi/calendar.rasi"
+month_offset='0'
+dump_mode='false'
+script_mode='false'
+
+if [[ "${1:-}" == '--dump' ]]; then
+	dump_mode='true'
+	shift
+fi
+
+if [[ "${1:-}" == '--script-mode' ]]; then
+	script_mode='true'
+	shift
+fi
+
+if [[ "${1:-}" =~ ^-?[0-9]+$ ]]; then
+	month_offset="$1"
+fi
+
+today_date="$(date +%Y-%m-%d)"
+
+colors_file="$HOME/.config/rofi/applets/shared/colors.rasi"
+selected_color="#F0C674FF"
+background_color="#282A2EFF"
+background_alt_color="#303336FF"
+foreground_color="#FFFFFFFF"
+
+headers=(
+	"Su"
+	"Mo"
+	"Tu"
+	"We"
+	"Th"
+	"Fr"
+	"Sa"
+)
+
+build_calendar() {
+	target_month="$(date -d "$(date +%Y-%m-01) ${month_offset} month" +%Y-%m-01)"
+	current_month="$(date -d "$target_month" +%m)"
+	month_title="$(date -d "$target_month" '+%B %Y')"
+	first_weekday="$(date -d "$target_month" +%w)"
+	grid_start="$(date -d "$target_month -$first_weekday day" +%Y-%m-%d)"
+	options=()
+	
+	# build header row (Su Mo Tu ...)
+	header_row=''
+	for header in "${headers[@]}"; do
+		header_row+="$(printf ' %2s ' "$header")"
+	done
+	options+=("$header_row")
+
+	for week in $(seq 0 5); do
+		week_row=''
+		for day in $(seq 0 6); do
+			i=$((week * 7 + day))
+			cell_date="$(date -d "$grid_start +$i day" +%Y-%m-%d)"
+			day_number="$(date -d "$cell_date" +%-d)"
+
+			if [[ "$(date -d "$cell_date" +%m)" != "$current_month" ]]; then
+				cell='    '
+			elif [[ "$cell_date" == "$today_date" ]]; then
+				cell="<span foreground='$background_color' background='$selected_color' weight='bold'> $(printf '%2s' "$day_number") </span>"
+			else
+				cell="$(printf ' %2s ' "$day_number")"
+			fi
+
+			week_row+="$cell"
+		done
+
+		options+=("$week_row")
+	done
+}
+
+run_rofi() {
+	local -a rofi_args=(
+		-theme-str 'window {width: 330px;}'
+		-kb-move-char-back ''
+		-kb-move-char-forward ''
+		-kb-custom-1 'Left,Alt+Left'
+		-kb-custom-2 'Right,Alt+Right'
+		-kb-custom-3 'Alt+Return'
+		-modi "calendar:$0 --script-mode"
+		-show calendar
+		-theme "$theme"
+	)
+
+	rofi "${rofi_args[@]}"
+}
+
+if [[ "$dump_mode" == 'true' ]]; then
+	build_calendar
+	# print header + week rows (one per line) to match 'cal' output
+	printf '%s\n' "${options[@]}"
+	exit 0
+fi
+
+if [[ "$script_mode" != 'true' ]]; then
+	build_calendar
+	run_rofi
+	exit 0
+fi
+
+month_offset="${ROFI_DATA:-$month_offset}"
+
+case "${ROFI_RETV:-0}" in
+	10)
+		month_offset=$((month_offset - 1))
+		;;
+	11)
+		month_offset=$((month_offset + 1))
+		;;
+    12)
+        month_offset='0'
+        ;;
+esac
+
+build_calendar
+
+printf '%s\0nonselectable\x1ftrue\n' "$month_title"
+
+printf '\0markup-rows\x1ftrue\n'
+printf '\0use-hot-keys\x1ftrue\n'
+printf '\0keep-selection\x1ftrue\n'
+printf '\0keep-filter\x1ftrue\n'
+printf '\0no-custom\x1ftrue\n'
+printf '\0data\x1f%s\n' "$month_offset"
+printf '%s\0urgent\x1ftrue\x1fnonselectable\x1ftrue\n' "${options[0]}"
+for row in "${options[@]:1}"; do
+	printf '%s\0nonselectable\x1ftrue\n' "$row"
+done
