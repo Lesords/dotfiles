@@ -1,3 +1,5 @@
+@import "colors/onedark.rasi"
+
 configuration {
     display-drun: "";
     display-window: "";
@@ -16,13 +18,16 @@ configuration {
     height: 40%;
     location: 0;
     spacing: 0;
-    transparent: rgba(34,62,79,0.80);
+    transparent: @background-alt;
 }
 
 window {
     location: center;
     anchor:   center;
 
+    border:                      2px solid;
+    border-radius:               15px;
+    border-color:                @selected;
     background-color:@transparent;
     spacing: 0;
     children:  [mainbox];
@@ -68,8 +73,10 @@ element-text {
     padding: 0px 13px;
 }
 
+element-text selected,
 element selected {
-    background-color: rgba(34,82,99);
+    text-color: @background;
+    background-color: @selected;
 }
 
 element-icon {
