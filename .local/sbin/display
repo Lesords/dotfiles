@@ -5,7 +5,7 @@ COUNT=$(xrandr | grep -c " connected")
 if [ "$COUNT" -eq 2 ]; then
     if [ "$(hostname)" == "laptop" ]; then
         xrandr --output eDP-1 --primary --auto
-        xrandr --output HDMI-1-0 --auto --below eDP-1
+        xrandr --output HDMI-1-0 --auto --right-of eDP-1
         i3-msg "workspace 1; move workspace to output eDP-1"
         i3-msg "workspace 4; move workspace to output HDMI-1-0"
     else
