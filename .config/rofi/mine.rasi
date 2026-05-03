@@ -1,85 +1,85 @@
 @import "colors/onedark.rasi"
 
 configuration {
-    display-drun: "";
-    display-window: "";
-    display-windowcd: "";
-    display-ssh: "";
-    display-run: "﮸";
-    show-icons: true;
-    drun-display-format: "{icon} {name} {comment}";
+    display-drun:           "";
+    display-window:         "";
+    display-windowcd:       "";
+    display-ssh:            "";
+    display-run:            "﮸";
+    show-icons:             true;
+    drun-display-format:    "{icon} {name} {comment}";
 }
 
 * {
-    font: "JetBrainsMono Nerd Font Mono 12.5";
-    background-color: transparent;
-    text-color: #f1f1f1;
-    width: 50%;
-    height: 40%;
-    location: 0;
-    spacing: 0;
-    transparent: @background-alt;
+    font:                   "JetBrainsMono Nerd Font Mono 12.5";
+    background-color:       transparent;
+    text-color:             #f1f1f1;
+    width:                  50%;
+    height:                 40%;
+    location:               0;
+    spacing:                0;
+    transparent:            @background-alt;
 }
 
 window {
-    location: center;
-    anchor:   center;
+    location:               center;
+    anchor:                 center;
 
-    border:                      2px solid;
-    border-radius:               15px;
-    border-color:                @selected;
-    background-color:@transparent;
-    spacing: 0;
-    children:  [mainbox];
-    orientation: horizontal;
+    border:                 2px solid;
+    border-radius:          15px;
+    border-color:           @selected;
+    background-color:       @transparent;
+    spacing:                0;
+    children:               [mainbox];
+    orientation:            horizontal;
 }
 
 inputbar {
-    border: 0 0 1px 0;
-    children: [prompt,entry];
+    border:                 0 0 1px 0;
+    children:               [prompt,entry];
 }
 
 prompt {
-    padding: 0px 13px 0px 13px;
-    border: 0 1px 0 0;
-    vertical-align: 0.5;
+    padding:                0px 13px 0px 13px;
+    border:                 0 1px 0 0;
+    vertical-align:         0.5;
 }
 
 textbox {
-    background-color:@transparent;
-    border: 0 0 1px 0;
-    border-color: #161B1A;
-    padding: 8px 13px;
+    background-color:       @transparent;
+    border:                 0 0 1px 0;
+    border-color:           #161B1A;
+    padding:                8px 13px;
 }
 
 entry {
-    padding: 13px;
+    padding:                13px;
 }
 
 listview {
-    cycle: false;
-    margin: 0 0 -1px 0;
-    scrollbar: false;
+    cycle:                  false;
+    margin:                 0 0 -1px 0;
+    scrollbar:              false;
 }
 
 element {
-    border: 0 0 1px 0;
-    padding: 4px;
+    border:                 0 0 1px 0;
+    padding:                4px;
 }
 
 element-text {
-    expand: true;
-    vertical-align: 0.5;
-    padding: 0px 13px;
+    expand:                 true;
+    vertical-align:         0.5;
+    padding:                0px 13px;
 }
 
 element-text selected,
 element selected {
-    text-color: @background;
-    background-color: @selected;
+    text-color:             @background;
+    background-color:       @selected;
 }
 
 element-icon {
-    size: 30px;
-    border: 0px;
+    size:                   30px;
+    border:                 0px;
 }
