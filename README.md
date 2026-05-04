@@ -36,6 +36,9 @@ git clone --depth=1 https://github.com/iDvel/rime-ice.git ~/.local/share/fcitx5/
 # polkit
 sudo apt install policykit-1-gnome
 
+# dunst
+sudo apt install dunst
+
 # flameshot
 sudo apt install flameshot
 ```
@@ -54,6 +57,9 @@ sudo dnf install network-manager-applet
 
 # polkit
 sudo dnf install lxqt-policykit -y
+
+# dunst
+sudo dnf install dunst
 
 # flameshot
 sudo dnf install flameshot -y
