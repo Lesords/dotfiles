@@ -1,0 +1,64 @@
+#!/bin/bash
+
+THEME=~/.config/rofi/session.rasi
+workspaces=$(i3-msg -t get_workspaces | jq -r '.[] | .name')
+
+confirm() {
+    echo -e "Yes\nNo" | rofi -dmenu -mesg "Are you sure to select $1?" \
+		-theme-str 'mainbox {children: [ "message", "listview" ];}' \
+		-theme-str 'listview {columns: 2; lines: 1;}' \
+		-theme-str 'textbox {horizontal-align: 0.5;}' \
+        -me-select-entry "" -me-accept-entry "MousePrimary" \
+        -theme "$THEME"
+}
+
+run_workspace() {
+    rofi -dmenu -p "${mode} workspace:" -theme "$THEME" \
+        -me-select-entry "" -me-accept-entry "MousePrimary"
+}
+
+run_session() {
+    echo -e "Save\nRestore" | rofi -dmenu -mesg "Session action" \
+		-theme-str 'mainbox {children: [ "message", "listview" ];}' \
+		-theme-str 'listview {columns: 2; lines: 1;}' \
+		-theme-str 'textbox {horizontal-align: 0.5;}' \
+        -me-select-entry "" -me-accept-entry "MousePrimary" \
+        -theme "$THEME"
+}
+
+mode=$(run_session)
+
+if [ -z "$mode" ]; then
+    exit 0
+fi
+
+if ! type i3-resurrect >/dev/null 2>&1; then
+    notify-send -u critical "Error" "i3-resurrect not found!"
+    exit 0
+fi
+
+chosen=$(echo -e "all\n$workspaces" | run_workspace)
+case "$chosen" in
+    "all")
+        [ "$(confirm "all")" = "Yes" ] && {
+            if [ "$mode" == "Save" ]; then
+                i3-resurrect save -S main
+                notify-send "${mode} workspace" "All saved"
+            elif [ "$mode" == "Restore" ]; then
+                i3-resurrect restore -S main
+                notify-send "${mode} workspace" "All restored"
+            fi
+        } ;;
+    "")
+        notify-send "${mode} workspace" "Aborted" ;;
+    *)
+        [ "$(confirm "$chosen")" = "Yes" ] && {
+            if [ "$mode" == "Save" ]; then
+                i3-resurrect save -w $chosen
+                notify-send "${mode} workspace" "$chosen saved"
+            elif [ "$mode" == "Restore" ]; then
+                i3-resurrect restore -w $chosen
+                notify-send "${mode} workspace" "$chosen restored"
+            fi
+        } ;;
+esac
