@@ -2,6 +2,7 @@
 
 THEME=~/.config/rofi/session.rasi
 workspaces=$(i3-msg -t get_workspaces | jq -r '.[] | .name')
+workspaces_num=$(echo "all $workspaces" | wc -w)
 
 confirm() {
     echo -e "Yes\nNo" | rofi -dmenu -mesg "Are you sure to select $1?" \
@@ -14,6 +15,7 @@ confirm() {
 
 run_workspace() {
     rofi -dmenu -p "${mode} workspace:" -theme "$THEME" \
+		-theme-str "listview {columns: 1; lines: $workspaces_num;}" \
         -me-select-entry "" -me-accept-entry "MousePrimary"
 }
 

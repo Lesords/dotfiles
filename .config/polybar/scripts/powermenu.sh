@@ -9,8 +9,11 @@ suspend="󰤄 Suspend"
 logout="󰍃 Logout"
 
 confirm() {
-    echo -e "Yes\nNo" | rofi -dmenu -p "  $1?" -theme "$THEME" \
-        -me-select-entry "" -me-accept-entry "MousePrimary"
+    sleep 0.1
+    echo -e "Yes\nNo" | rofi -dmenu -p "  $1?" \
+        -theme-str 'listview {columns: 1; lines: 2;}' \
+        -me-select-entry "" -me-accept-entry "MousePrimary" \
+        -theme "$THEME"
 }
 
 chosen=$(echo -e "$shutdown\n$reboot\n$lock\n$suspend\n$logout" \
