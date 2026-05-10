@@ -58,3 +58,9 @@ if type zoxide >/dev/null 2>&1; then
     export _ZO_DOCTOR=0
     eval "$(zoxide init bash)"
 fi
+
+if [ -n "$SSH_CONNECTION" ]; then
+    tmux setenv -g IS_SSH 1 2>/dev/null
+else
+    tmux setenv -gu IS_SSH 2>/dev/null
+fi
