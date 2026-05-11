@@ -3,7 +3,15 @@
 direction="$1"
 
 # 获取所有连接的显示器
-outputs=($(xrandr --query | grep " connected" | awk '{print $1}'))
+outputs=($(xrandr --query | grep " connected" | \
+awk '{
+    for(i=1;i<=NF;i++){
+        if($i ~ /^[0-9]+x[0-9]+\+/){
+            split($i,a,"+");
+            print a[2], $1
+        }
+    }
+}' | sort -n | awk '{print $2}'))
 
 # 获取当前焦点所在显示器
 current_output=$(i3-msg -t get_workspaces | jq -r '.[] | select(.focused==true) | .output')
