@@ -149,6 +149,9 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + space     | toggle mode   |
 | mod + r         | resize window |
 | mod + z         | fullscreen    |
+| mod + ctrl + 0  | reset the gaps    |
+| mod + ctrl + -  | decrease the gaps |
+| mod + ctrl + +  | increase the gaps |
 | mod + return    | start a terminal        |
 | mod + e         | start thunar            |
 | mod + n         | app launcher with rofi  |
