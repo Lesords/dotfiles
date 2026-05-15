@@ -132,9 +132,8 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + x         | toggle polybar      |
 | mod + i | split in horizontal |
 | mod + u | split in vertical   |
-| mod + s | stacked layout      |
-| mod + t | tabbed layout       |
-| mod + w | toggle split        |
+| mod + b | toggle stacked or tabbed layout |
+| mod + w | toggle split                    |
 | mod + f | toggle floating     |
 | mod + a | focus parent        |
 | mod + d | focus child         |
