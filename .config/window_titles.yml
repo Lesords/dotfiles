@@ -1,0 +1,65 @@
+# the icon to fall back to, if there is no mapping
+default_icon: 󰣆
+# spaces to insert between the icon & window title
+padding: 1
+# auto-capitalize window titles, when they are not manually set.
+capitalize: true
+
+# show workspace info, when no window is focused.
+workspace:
+  enabled: true
+  icon: 
+  title: Desktop
+
+# mappings for each application
+mappings:
+- class: org.mozilla.firefox
+  title: Firefox
+  icon: 
+- class: Google-chrome-canary
+  title: Chrome
+  icon: 
+- class: Google-chrome
+  title: Chrome
+  icon: 
+- class: Pcmanfm
+  title: PCManFM
+  icon: &file 
+- class: Thunar
+  title: Thunar
+  icon: *file
+  show_native_title: true
+- class: dolphin
+  title: Dolphin
+  icon: *file
+  show_native_title: true
+- class: org.gnome.Nautilus
+  title: Nautilus
+  icon: *file
+  show_native_title: true
+- class: org.wezfurlong.wezterm
+  title: WezTerm
+  icon: &term 
+- class: kitty
+  icon: *term
+  title: Kitty
+  show_native_title: true
+- class: konsole
+  icon: *term
+  title: Konsole
+  show_native_title: true
+- class: com.mitchellh.ghostty
+  icon: *term
+  title: Ghostty
+  show_native_title: true
+- class: okular
+  icon: 
+  title: Okular
+  show_native_title: true
+- class: vlc
+  icon: 󰕼
+  title: Vlc
+
+native_title_separators:
+  start: "("
+  end: ")"
