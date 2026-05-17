@@ -184,6 +184,12 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Normal | Ctrl + j      | Go to down panel   |
 | Normal | Ctrl + k      | Go to up panel     |
 | Normal | Ctrl + l      | Go to right panel  |
+| Normal | Ctrl + S      | Enter Sync Mode      |
+| Normal | Ctrl + R      | Reload configuration |
+| Normal | Prefix + T    | Open popup window                   |
+| Normal | Prefix + P    | Open larger popup window            |
+| Normal | Prefix + H    | Open btop using the popup window    |
+| Normal | Prefix + F    | Open joshuto using the popup window |
 | Normal | Prefix + Tab  | Open extrakto      |
 | Normal | Prefix + Ctrl + s  | Save Tmux environment      |
 | Normal | Prefix + Ctrl + r  | Restore Tmux environment   |
