@@ -190,7 +190,8 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Normal | Prefix + P    | Open larger popup window            |
 | Normal | Prefix + H    | Open btop using the popup window    |
 | Normal | Prefix + F    | Open joshuto using the popup window |
-| Normal | Prefix + Tab  | Open extrakto      |
+| Normal | Prefix + Tab    | Open extrakto      |
+| Normal | Prefix + Space  | Enter fingers mode |
 | Normal | Prefix + Ctrl + s  | Save Tmux environment      |
 | Normal | Prefix + Ctrl + r  | Restore Tmux environment   |
 | Normal | Prefix + /         | Search with regex                        |
