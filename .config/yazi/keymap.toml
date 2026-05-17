@@ -1,6 +1,21 @@
+# Ref: yazi-config/preset/keymap-default.toml
+
 [mgr]
+prepend_keymap = [
+    { on = "<Tab>", run = "tab_switch 1 --relative", desc = "Next tab" },
+    { on = "<BackTab>", run = "tab_switch -1 --relative", desc = "Prev tab" },
+
+    { on = "<A-Enter>", run = "spot", desc = "Spot file" },
+]
+
 append_keymap = [
     { on = "e", run = 'shell --block -- vim "$0"', desc = "Open with vim" },
     { on = "i", run = 'shell --block -- bat "$0" -p --paging=always', desc = "View with bat" },
     { on = "<C-o>", run = 'shell --block -- bash --login', desc = "Open new shell in yazi" },
+    { on = "<C-w>", run = 'close', desc = "Close the current tab, or quit if it's last" },
+]
+
+[spot]
+append_keymap = [
+	{ on = "<A-Enter>", run = "close", desc = "Close the spot" },
 ]
