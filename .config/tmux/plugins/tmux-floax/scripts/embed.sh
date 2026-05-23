@@ -10,6 +10,8 @@ if [ -z "$FLOAX_SESSION_NAME" ]; then
 fi
 
 embed() {
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
     unset_bindings
     number_of_windows=$(tmux list-windows -t "$FLOAX_SESSION_NAME" | wc -l)
     if [ "$number_of_windows" -eq 1 ]; then

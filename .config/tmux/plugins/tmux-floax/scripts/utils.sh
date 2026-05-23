@@ -24,6 +24,34 @@ DEFAULT_TITLE='FloaX: C-M-s 󰘕   C-M-b 󰁌   C-M-f 󰊓   C-M-r 󰑓
 FLOAX_SESSION_NAME=$(envvar_value FLOAX_SESSION_NAME)
 DEFAULT_SESSION_NAME='scratch'
 
+current_session_name() {
+    tmux display-message -p '#{session_name}'
+}
+
+cleanup_bindings_if_inactive() {
+    if [ -z "$FLOAX_SESSION_NAME" ]; then
+        FLOAX_SESSION_NAME="$DEFAULT_SESSION_NAME"
+    fi
+    if [ "$(current_session_name)" != "$FLOAX_SESSION_NAME" ]; then
+        unset_bindings
+        tmux setenv -gu ORIGIN_SESSION 2>/dev/null || true
+        tmux display-message -d 2000 "FloaX: inactive; bindings removed"
+        return 1
+    fi
+    return 0
+}
+
+require_origin_session() {
+    local origin
+    origin="$(envvar_value ORIGIN_SESSION)"
+    if [ -z "$origin" ]; then
+        unset_bindings
+        tmux display-message -d 2000 "FloaX: missing ORIGIN_SESSION; bindings removed"
+        return 1
+    fi
+    return 0
+}
+
 set_bindings() {
     tmux bind -n C-M-s run "$CURRENT_DIR/zoom-options.sh in"
     tmux bind -n C-M-b run "$CURRENT_DIR/zoom-options.sh out"

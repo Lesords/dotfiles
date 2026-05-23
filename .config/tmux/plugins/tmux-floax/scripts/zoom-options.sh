@@ -4,6 +4,8 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$CURRENT_DIR/utils.sh"
 
 resize() {
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
     current_width=$(tmux display -p '#{window_width}')
     current_height=$(tmux display -p '#{window_height}')
     if [ $((current_height+step)) -le 0 ] || [ $((current_width+step)) -le 0 ]; then
@@ -21,6 +23,8 @@ resize() {
 }
 
 full_screen() {
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
     tmux setenv -g FLOAX_WIDTH 100%
     tmux setenv -g FLOAX_HEIGHT 100%
     tmux detach-client
@@ -28,6 +32,8 @@ full_screen() {
 }
 
 reset_size() {
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
     tmux setenv -g FLOAX_WIDTH "$(tmux_option_or_fallback '@floax-width' '80%')" 
     tmux setenv -g FLOAX_HEIGHT "$(tmux_option_or_fallback '@floax-height' '80%')" 
     tmux detach-client
@@ -35,6 +41,8 @@ reset_size() {
 }
 
 unlock_bindings() {
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
     set_bindings
     local saved_title
     saved_title="$(tmux showenv -g FLOAX_TITLE_SAVED 2>/dev/null | cut -d '=' -f 2-)"
@@ -47,6 +55,8 @@ unlock_bindings() {
 }
 
 lock_bindings() {
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
     unset_bindings
     tmux setenv -g FLOAX_TITLE_SAVED "$FLOAX_TITLE"
     unset_bindings
@@ -55,6 +65,8 @@ lock_bindings() {
 }
 
 change_popup_title() {
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
     tmux setenv -g FLOAX_TITLE "$1"
     tmux detach-client
     tmux_popup
