@@ -59,7 +59,6 @@ lock_bindings() {
     require_origin_session || return 0
     unset_bindings
     tmux setenv -g FLOAX_TITLE_SAVED "$FLOAX_TITLE"
-    unset_bindings
     tmux bind -n C-M-u run "$CURRENT_DIR/zoom-options.sh unlock" 
     change_popup_title "Bindings locked. Unlock with [Ctrl-Alt-u]"
 }

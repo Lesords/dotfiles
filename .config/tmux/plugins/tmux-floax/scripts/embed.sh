@@ -20,7 +20,7 @@ embed() {
         # otherwise the session dies and popping back won't work
         tmux neww -d
     fi
-    tmux movew -t "$ORIGIN_SESSION"
+    tmux movew -t "${ORIGIN_SESSION}:"
     tmux detach-client
 }
 
