@@ -64,3 +64,13 @@ if [ -n "$SSH_CONNECTION" ]; then
 else
     tmux setenv -gu IS_SSH 2>/dev/null
 fi
+
+if type ibus-daemon >/dev/null 2>&1; then
+    export GTK_IM_MODULE=ibus
+    export QT_IM_MODULE=ibus
+    export XMODIFIERS=@im=ibus
+elif type fcitx5 >/dev/null 2>&1; then
+    export GTK_IM_MODULE=fcitx5
+    export QT_IM_MODULE=fcitx5
+    export XMODIFIERS=@im=fcitx5
+fi
