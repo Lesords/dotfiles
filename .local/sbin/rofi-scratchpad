@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+DESKTOP_DIRS=(
+    "$HOME/.local/share/applications"
+    /usr/share/applications
+    /usr/local/share/applications
+    /var/lib/flatpak/exports/share/applications
+    "$HOME/.local/share/flatpak/exports/share/applications"
+)
+
+CACHE_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/rofi-window-icons"
+
+declare -A icon_cache
+
+is_cache_fresh() {
+    [[ -s "$CACHE_FILE" ]] || return 1
+    for dir in "${DESKTOP_DIRS[@]}"; do
+        [[ -d "$dir" ]] || continue
+        local dm cm
+        dm=$(stat -c %Y "$dir" 2>/dev/null) || continue
+        cm=$(stat -c %Y "$CACHE_FILE" 2>/dev/null) || return 1
+        [[ "$dm" -gt "$cm" ]] && return 1
+    done
+    return 0
+}
+
+build_cache() {
+    if is_cache_fresh; then
+        while IFS='=' read -r key value; do
+            icon_cache["$key"]="$value"
+        done < "$CACHE_FILE"
+        return
+    fi
+
+    local files=()
+    for dir in "${DESKTOP_DIRS[@]}"; do
+        [[ -d "$dir" ]] && files+=("$dir"/*.desktop)
+    done
+    shopt -s nullglob
+
+    local current_file="" class="" icon="" name=""
+
+    while IFS=':' read -r filepath line; do
+        if [[ "$filepath" != "$current_file" ]]; then
+            if [[ -n "$current_file" ]]; then
+                name=$(basename "$current_file" .desktop)
+                [[ -n "$class" ]] && [[ -z "${icon_cache[$class]}" ]] && icon_cache["$class"]="$icon"
+                [[ -z "${icon_cache[${name,,}]}" ]] && icon_cache["${name,,}"]="$icon"
+            fi
+            current_file="$filepath"
+            class=""
+            icon=""
+        fi
+        case "$line" in
+            Icon=*)            [[ -z "$icon" ]] && icon="${line#Icon=}" ;;
+            StartupWMClass=*) class="${line#StartupWMClass=}" ;;
+        esac
+    done < <(grep -EH '^(Icon|StartupWMClass)=' "${files[@]}" 2>/dev/null)
+
+    if [[ -n "$current_file" ]]; then
+        name=$(basename "$current_file" .desktop)
+        [[ -n "$class" ]] && [[ -z "${icon_cache[$class]}" ]] && icon_cache["$class"]="$icon"
+        [[ -z "${icon_cache[${name,,}]}" ]] && icon_cache["${name,,}"]="$icon"
+    fi
+
+    for key in "${!icon_cache[@]}"; do
+        printf '%s=%s\n' "$key" "${icon_cache[$key]}"
+    done > "$CACHE_FILE"
+}
+
+get_icon() {
+    local class="$1"
+    echo "${icon_cache["$class"]:-${icon_cache[${class,,}]:-$class}}"
+}
+
+is_scratchpad() {
+    local winid="$1"
+    local state
+    state=$(xprop -id "$winid" WM_STATE 2>/dev/null)
+    [[ "$state" == *Withdrawn* ]]
+}
+
+get_windows() {
+    wmctrl -lx | while IFS=' ' read -r winid desktop wmclass host title; do
+        [[ "$desktop" != "-1" ]] && continue
+        is_scratchpad "$winid" || continue
+
+        instance="${wmclass%%.*}"
+        class_part="${wmclass#*.}"
+        icon=$(get_icon "${instance}")
+        [[ "$icon" == "$instance" ]] && [[ "$class_part" != "$instance" ]] && icon=$(get_icon "${class_part}")
+
+        echo -en "${instance} — ${title}\0icon\x1f${icon}\x1finfo\x1f${winid}\n"
+    done
+}
+
+focus_window() {
+    wmctrl -ia "$1"
+    xdotool windowactivate "$1" 2>/dev/null
+}
+
+build_cache
+
+case "$ROFI_RETV" in
+    0) get_windows ;;
+    1) focus_window "$ROFI_INFO" ;;
+esac
