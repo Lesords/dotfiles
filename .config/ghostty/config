@@ -56,6 +56,22 @@ font-size=16
 
 keybind = ctrl+shift+w=close_surface
 keybind = ctrl+alt+p=toggle_command_palette
+keybind = ctrl+m=text:\x0d
+keybind = ctrl+j=text:\x0a
+keybind = ctrl+q=text:\x11
+keybind = ctrl+s=text:\x13
+keybind = alt+d=esc:d
+keybind = alt+q=esc:q
+keybind = alt+s=esc:s
+keybind = alt+h=esc:h
+keybind = alt+j=esc:j
+keybind = alt+k=esc:k
+keybind = alt+l=esc:l
+keybind = alt+J=esc:J
+keybind = alt+K=esc:K
+keybind = alt+n=esc:n
+keybind = alt+m=esc:m
+keybind = alt+o=esc:o
 
 gtk-titlebar = false
 window-decoration = server
