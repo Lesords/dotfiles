@@ -204,8 +204,8 @@ keybinding:
     markCommitAsFixup: 'f'
     createFixupCommit: 'F' # create fixup commit for this commit
     squashAboveCommits: 'S'
-    moveDownCommit: '<c-j>' # move commit down one
-    moveUpCommit: '<c-k>' # move commit up one
+    moveDownCommit: '<c-e>' # move commit down one
+    moveUpCommit: '<c-y>' # move commit up one
     amendToCommit: 'A'
     pickCommit: 'p' # pick commit (when mid-rebase)
     revertCommit: 't'
@@ -215,8 +215,8 @@ keybinding:
     tagCommit: 'T'
     checkoutCommit: '<space>'
     resetCherryPick: '<c-R>'
-    copyCommitMessageToClipboard: '<c-y>'
-    openLogMenu: '<c-l>'
+    copyCommitMessageToClipboard: 'y'
+    openLogMenu: '<c-L>'
     viewBisectOptions: 'b'
   stash:
     popStash: 'g'
