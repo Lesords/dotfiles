@@ -1,0 +1,40 @@
+QTabWidget, QTabWidget::pane {
+  border: 0;
+  background: #282828;
+}
+QMenuBar {
+  border: none;
+}
+QTabBar {
+  background: #282828;
+  border: none;
+  qproperty-drawBase: false;
+}
+QTabBar::tab {
+  background: #3c3836;
+  color: #928374;
+  min-width: 120px;
+  padding: 5px 12px;
+  margin-right: 1px;
+  border: none;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+}
+QTabBar::tab:hover {
+  background: #504945;
+  color: #a89984;
+}
+QTabBar::tab:selected {
+  background: #665c54;
+  color: #ebdbb2;
+  border: none;
+  border-bottom: none;
+}
+QTabBar::close-button {
+  width: 16px;
+  height: 16px;
+}
+QTabBar::close-button:hover {
+  background: rgba(204, 36, 29, 0.15);
+  border-radius: 2px;
+}
