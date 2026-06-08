@@ -5,6 +5,8 @@ source "$CURRENT_DIR/utils.sh"
 
 # Must set these BEFORE using them in functions
 ORIGIN_SESSION="$(envvar_value ORIGIN_SESSION)"
+# Inside popup, the current session IS the floax session
+FLOAX_SESSION_NAME="$(tmux display -p '#{session_name}')"
 if [ -z "$FLOAX_SESSION_NAME" ]; then
     FLOAX_SESSION_NAME="$DEFAULT_SESSION_NAME"
 fi
