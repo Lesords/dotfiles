@@ -130,24 +130,25 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + -         | move to scratchpad  |
 | mod + shift + - | show scratchpad     |
 | mod + x         | toggle polybar      |
+| mod + g         | show network info   |
 | mod + i | split in horizontal |
 | mod + u | split in vertical   |
 | mod + b | toggle stacked or tabbed layout |
 | mod + w | toggle split                    |
 | mod + f | toggle floating     |
-| mod + a | focus parent        |
-| mod + d | focus child         |
 | mod + h         | focus left    |
 | mod + j         | focus down    |
 | mod + k         | focus up      |
 | mod + l         | focus right   |
+| mod + space     | toggle mode   |
+| mod + a         | focus parent  |
+| mod + d         | focus child   |
 | mod + shift + h | move left     |
 | mod + shift + j | move down     |
 | mod + shift + k | move up       |
 | mod + shift + l | move right    |
-| mod + space     | toggle mode   |
-| mod + r         | resize window |
 | mod + z         | fullscreen    |
+| mod + r         | resize window |
 | mod + ctrl + 0  | reset the gaps    |
 | mod + ctrl + -  | decrease the gaps |
 | mod + ctrl + +  | increase the gaps |
