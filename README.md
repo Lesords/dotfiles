@@ -187,10 +187,8 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Normal | Ctrl + l      | Go to right panel  |
 | Normal | Prefix + S    | Enter Sync Mode      |
 | Normal | Prefix + R    | Reload configuration |
-| Normal | Prefix + T    | Open popup window                   |
-| Normal | Prefix + P    | Open larger popup window            |
-| Normal | Prefix + H    | Open btop using the popup window    |
-| Normal | Prefix + F    | Open joshuto using the popup window |
+| Normal | Prefix + Ctrl + p | Open popup window (ephemeral) |
+| Normal | Ctrl + Alt + o   | Toggle floax popup (persistent) |
 | Normal | Prefix + Tab    | Open extrakto      |
 | Normal | Prefix + Space  | Enter fingers mode |
 | Normal | Prefix + Ctrl + s  | Save Tmux environment      |
@@ -202,6 +200,18 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Normal | Prefix + Ctrl + u  | Search url (http, ftp and git urls)      |
 | Normal | Prefix + Ctrl + d  | Search number (mnemonic d, as digit)     |
 | Normal | Prefix + Alt + i   | Search ip address                        |
+| Normal | Ctrl + Alt + h | Previous window |
+| Normal | Ctrl + Alt + l | Next window     |
+| Normal | Ctrl + Alt + p | Last window     |
+| Normal | Prefix + e     | Cycle mode: off → resize → layout → off |
+| Resize | h/j/k/l | Resize pane by 5 (left/down/up/right) |
+| Resize | H/J/K/L | Resize pane by 20 (left/down/up/right) |
+| Resize | z       | Zoom pane toggle |
+| Resize | q       | Exit resize mode |
+| Layout | Space   | Switch to main-vertical layout + first pane 70% |
+| Layout | t       | Switch to tiled layout |
+| Layout | n       | Next layout |
+| Layout | p       | Previous layout |
 | Copy   | o             | Open a highlighted selection with the system default program                           |
 | Copy   | Ctrl + o      | Open a highlighted selection with the $EDITOR                                          |
 | Copy   | Shift + s     | Search the highlighted selection directly inside a search engine (defaults to google)  |
