@@ -178,6 +178,7 @@ restore_pane() {
 	while IFS=$d read line_type session_name window_number window_active window_flags pane_index pane_title dir pane_active pane_command pane_full_command; do
 		dir="$(remove_first_char "$dir")"
 		pane_full_command="$(remove_first_char "$pane_full_command")"
+		pane_title="$(remove_first_char "$pane_title")"
 		if [ "$session_name" == "0" ]; then
 			restored_session_0_true
 		fi
