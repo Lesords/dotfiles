@@ -13,13 +13,16 @@ output_suffix='@prefix_highlight_output_suffix'
 show_copy_config='@prefix_highlight_show_copy_mode'
 show_sync_config='@prefix_highlight_show_sync_mode'
 show_resize_config='@prefix_highlight_show_resize_mode'
+show_layout_config='@prefix_highlight_show_layout_mode'
 copy_attr_config='@prefix_highlight_copy_mode_attr'
 sync_attr_config='@prefix_highlight_sync_mode_attr'
 resize_attr_config='@prefix_highlight_resize_mode_attr'
+layout_attr_config='@prefix_highlight_layout_mode_attr'
 prefix_prompt='@prefix_highlight_prefix_prompt'
 copy_prompt='@prefix_highlight_copy_prompt'
 sync_prompt='@prefix_highlight_sync_prompt'
 resize_prompt='@prefix_highlight_resize_prompt'
+layout_prompt='@prefix_highlight_layout_prompt'
 empty_prompt='@prefix_highlight_empty_prompt'
 empty_attr_config='@prefix_highlight_empty_attr'
 empty_has_affixes='@prefix_highlight_empty_has_affixes'
@@ -45,11 +48,13 @@ default_bg='colour04'
 default_copy_attr='fg=default,bg=yellow'
 default_sync_attr='fg=default,bg=yellow'
 default_resize_attr='fg=black,bg=green'
+default_layout_attr='fg=black,bg=cyan'
 default_empty_attr='fg=default,bg=default'
 default_prefix_prompt=$(tmux_option prefix | tr "[:lower:]" "[:upper:]" | sed 's/C-/\^/')
 default_copy_prompt='Copy'
 default_sync_prompt='Sync'
 default_resize_prompt='R'
+default_layout_prompt='L'
 default_empty_prompt=''
 
 main() {
@@ -59,15 +64,18 @@ main() {
         show_copy_mode=$(tmux_option "$show_copy_config" "off") \
         show_sync_mode=$(tmux_option "$show_sync_config" "off") \
         show_resize_mode=$(tmux_option "$show_resize_config" "off") \
+        show_layout_mode=$(tmux_option "$show_layout_config" "off") \
         output_prefix=$(tmux_option "$output_prefix" " ") \
         output_suffix=$(tmux_option "$output_suffix" " ") \
         copy_attr=$(tmux_option "$copy_attr_config" "$default_copy_attr") \
         sync_attr=$(tmux_option "$sync_attr_config" "$default_sync_attr") \
         resize_attr=$(tmux_option "$resize_attr_config" "$default_resize_attr") \
+        layout_attr=$(tmux_option "$layout_attr_config" "$default_layout_attr") \
         prefix_prompt=$(tmux_option "$prefix_prompt" "$default_prefix_prompt") \
         copy_prompt=$(tmux_option "$copy_prompt" "$default_copy_prompt") \
         sync_prompt=$(tmux_option "$sync_prompt" "$default_sync_prompt") \
         resize_prompt=$(tmux_option "$resize_prompt" "$default_resize_prompt") \
+        layout_prompt=$(tmux_option "$layout_prompt" "$default_layout_prompt") \
         empty_prompt=$(tmux_option "$empty_prompt" "$default_empty_prompt") \
         empty_attr=$(tmux_option "$empty_attr_config" "$default_empty_attr") \
         empty_has_affixes=$(tmux_option "$empty_has_affixes" "off")
@@ -84,6 +92,9 @@ main() {
     local -r resize_highlight="$(format_style "${resize_attr:+default,$resize_attr}")"
     local -r resize_mode="$resize_highlight$output_prefix$resize_prompt$output_suffix"
 
+    local -r layout_highlight="$(format_style "${layout_attr:+default,$layout_attr}")"
+    local -r layout_mode="$layout_highlight$output_prefix$layout_prompt$output_suffix"
+
     local -r empty_highlight="$(format_style "${empty_attr:+default,$empty_attr}")"
     if [[ "on" = "$empty_has_affixes" ]]; then
         local -r empty_mode="$empty_highlight$output_prefix$empty_prompt$output_suffix"
@@ -91,7 +102,7 @@ main() {
         local -r empty_mode="$empty_highlight$empty_prompt"
     fi
 
-    local -r base_fallback="#{?@resize_mode,$resize_mode,$empty_mode}"
+    local -r base_fallback="#{?@layout_mode,$layout_mode,#{?@resize_mode,$resize_mode,$empty_mode}}"
     if [[ "on" = "$show_copy_mode" ]]; then
         if [[ "on" = "$show_sync_mode" ]]; then
             local -r fallback="#{?pane_in_mode,$copy_mode,#{?synchronize-panes,$sync_mode,$base_fallback}}"
