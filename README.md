@@ -203,6 +203,7 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Normal | Ctrl + Alt + h | Previous window |
 | Normal | Ctrl + Alt + l | Next window     |
 | Normal | Ctrl + Alt + p | Last window     |
+| Normal | Ctrl + Alt + z | Toggle pane zoom |
 | Normal | Prefix + e     | Cycle mode: off → resize → layout → off |
 | Resize | h/j/k/l | Resize pane by 5 (left/down/up/right) |
 | Resize | H/J/K/L | Resize pane by 20 (left/down/up/right) |
