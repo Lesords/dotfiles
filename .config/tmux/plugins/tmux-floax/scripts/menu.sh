@@ -10,8 +10,13 @@ check_current_session() {
     fi
     current_session=$(tmux display-message -p '#{session_name}')
     if [ "$current_session" != "$FLOAX_SESSION_NAME" ]; then
-        tmux menu \
-            "pop current window" p "run \"$CURRENT_DIR/embed.sh pop\"" 
+        if tmux has-session -t "$FLOAX_SESSION_NAME" 2>/dev/null; then
+            tmux menu \
+                "pop current window" p "run \"$CURRENT_DIR/embed.sh pop\""
+        else
+            tmux display-message -d 3000 \
+                "FloaX: open floax first with Ctrl+Alt+o"
+        fi
         exit 0
     fi
 }

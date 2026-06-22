@@ -27,13 +27,18 @@ embed() {
 }
 
 pop() {
-    # Ensure scratch session exists before trying to move window to it
-    if ! tmux has-session -t "$FLOAX_SESSION_NAME" 2>/dev/null; then
-        tmux new-session -d -s "$FLOAX_SESSION_NAME"
-        tmux set-option -t "$FLOAX_SESSION_NAME" status off
+    target_session="$(envvar_value FLOAX_SESSION_NAME)"
+    if [ -z "$target_session" ] || [ "$target_session" = "scratch" ]; then
+        tmux display-message -d 3000 "FloaX: no session to pop to"
+        return 1
     fi
-    tmux movew -t "$FLOAX_SESSION_NAME"
-    tmux_popup
+
+    tmux run-shell -b "
+        tmux has-session -t '$target_session' 2>/dev/null ||
+            tmux new-session -d -s '$target_session' 2>/dev/null
+        tmux movew -t '$target_session' 2>/dev/null
+        tmux popup -E 'tmux attach-session -t \"$target_session\"' 2>/dev/null
+    "
 }
 
 action=$1
