@@ -53,6 +53,8 @@ if type fzf >/dev/null 2>&1; then
         bind '"\eh": "\C-ufzf-cd\C-m"'
         if [ "$MSYSTEM" ]; then
             bind -x '"\es": "fzf-start"'
+        else
+            bind -x '"\es": "claude-sessions"'
         fi
     fi
 fi

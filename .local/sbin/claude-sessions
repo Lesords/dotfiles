@@ -1,0 +1,512 @@
+#!/usr/bin/env python3
+"""
+claude-sessions — 交互式浏览/查看 Claude Code session
+
+用法:
+  claude-sessions             打开 fzf 交互式选择器（带 preview）
+  claude-sessions list        列出所有 session
+  claude-sessions view <uuid> 查看 session 完整对话
+  claude-sessions info <uuid> 查看 session 详细信息
+  claude-sessions search <kw> 搜索 session
+"""
+
+import json
+import os
+import subprocess
+import sys
+import textwrap
+import time
+from datetime import datetime
+from pathlib import Path
+
+# ── config ────────────────────────────────────────────────────────────────────
+
+CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
+HELP_FLAG = "/tmp/.claude-sessions-help"
+SCOPE_FLAG = "/tmp/.claude-sessions-scope"
+
+# ── ANSI colors ───────────────────────────────────────────────────────────────
+
+CYAN    = "\033[38;5;45m"
+MAGENTA = "\033[38;5;201m"
+GRAY    = "\033[38;5;242m"
+GREEN   = "\033[38;5;84m"
+YELLOW  = "\033[38;5;220m"
+WHITE   = "\033[38;5;252m"
+BOLD    = "\033[1m"
+RESET   = "\033[0m"
+
+BG_BLUE  = "\033[48;5;18m"
+BG_GREEN = "\033[48;5;22m"
+
+
+def col(s, c):
+    return f"{c}{s}{RESET}"
+
+
+# ── project dir decode ───────────────────────────────────────────────────────
+
+def decode_project_dir(encoded: str) -> Path | None:
+    raw = encoded.lstrip("-").replace("--", "-\x00")
+    parts = []
+    for token in raw.split("-"):
+        if token.startswith("\x00"):
+            parts.append("." + token[1:])
+        elif token:
+            parts.append(token)
+
+    def match(base, tokens):
+        if not tokens:
+            return base
+        for w in range(1, len(tokens) + 1):
+            c = "-".join(tokens[:w])
+            cand = base / c
+            if cand.exists():
+                r = match(cand, tokens[w:])
+                if r is not None:
+                    return r
+        return None
+
+    r = match(Path("/"), parts)
+    return r if r else (Path("/") / "/".join(parts) if parts else None)
+
+
+# ── jsonl parsing ─────────────────────────────────────────────────────────────
+
+def parse_jsonl(path: Path) -> list[dict]:
+    try:
+        with open(path) as f:
+            return [json.loads(l) for l in f if l.strip()]
+    except Exception:
+        return []
+
+
+def first_message(entries: list[dict]) -> str:
+    for d in entries:
+        if d.get("type") != "user":
+            continue
+        content = d.get("message", {}).get("content", [])
+        texts = []
+        if isinstance(content, str):
+            texts = [content]
+        elif isinstance(content, list):
+            texts = [c["text"] for c in content
+                     if isinstance(c, dict) and c.get("type") == "text"]
+        for t in texts:
+            t = t.strip()
+            if t and not t.startswith("<"):
+                return " ".join(t.split())
+    return ""
+
+
+def count_messages(entries: list[dict]) -> dict:
+    c = {"user": 0, "assistant": 0, "tool": 0, "other": 0}
+    for d in entries:
+        c[d.get("type", "other")] = c.get(d.get("type", "other"), 0) + 1
+    return c
+
+
+def session_age(mtime: float) -> str:
+    s = int(time.time() - mtime)
+    if s < 60: return "now"
+    if s < 3600: return f"{s // 60}m"
+    if s < 86400: return f"{s // 3600}h"
+    return f"{s // 86400}d"
+
+
+def format_time(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
+
+
+def collect_sessions():
+    if not CLAUDE_PROJECTS.exists():
+        return []
+    sessions = []
+    for p in sorted(CLAUDE_PROJECTS.iterdir()):
+        if not p.is_dir():
+            continue
+        real = decode_project_dir(p.name)
+        short = str(real).replace(str(Path.home()), "~") if real else "?"
+        for f in sorted(p.glob("*.jsonl"),
+                        key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.stem.startswith("agent-"):
+                continue
+            entries = parse_jsonl(f)
+            msg = first_message(entries)
+            if not msg:
+                continue
+            mtime = f.stat().st_mtime
+            sessions.append({
+                "sid": f.stem, "project": real or Path(),
+                "project_short": short, "first_msg": msg,
+                "mtime": mtime, "age": session_age(mtime),
+                "time": format_time(mtime),
+                "counts": count_messages(entries),
+                "total_msgs": sum(count_messages(entries).values()),
+                "path": f,
+            })
+    return sessions
+
+
+# ── picker output (for fzf) ──────────────────────────────────────────────────
+
+def emit_picker_lines():
+    """Print tab-delimited lines for fzf:  <display>\t<proj_short>\t<proj_path>\t<sid>"""
+    sessions = collect_sessions()
+    scope_on = os.path.exists(SCOPE_FLAG)
+    cwd = Path.cwd()
+
+    # Filter by current directory when scope mode is on
+    if scope_on:
+        sessions = [s for s in sessions
+                    if str(cwd) in str(s["project"])]
+
+    # Header line (sticky via --header-lines=1)
+    if scope_on:
+        label = f"^A: show all"
+    else:
+        label = f"^A: {cwd.name}"
+    print(col(f"  ?  toggle help  |  {label}", GRAY))
+    groups = {}
+    for s in sessions:
+        groups.setdefault(s["project_short"], []).append(s)
+
+    for proj, convs in groups.items():
+        count = len(convs)
+        print(f"  {col(proj, CYAN)}  {col(f'({count})', GRAY)}")
+        for s in convs:
+            label = (s["first_msg"][:58] + "…") if len(s["first_msg"]) > 58 else s["first_msg"]
+            age_s = col(f"[{s['age']:>3}]", MAGENTA)
+            proj_path = str(s["project"])
+            print(f"    {age_s}  {col(label, WHITE)}\t{s['project_short']}\t{proj_path}\t{s['sid']}")
+
+
+# ── preview (called by fzf --preview) ────────────────────────────────────────
+
+def _show_help():
+    print(col("  Keybindings", BOLD))
+    print()
+    print(f"  {col('Enter', GREEN)}   resume session")
+    print(f"  {col('Esc', GREEN)}    close picker")
+    print(f"  {col('J/K', GREEN)}    scroll preview")
+    print(f"  {col('g/G', GREEN)}    preview top/bottom")
+    print(f"  {col('^D/^U', GREEN)}  preview half-page")
+    print(f"  {col('/', GREEN)}      toggle preview pane")
+    print(f"  {col('?', GREEN)}      toggle this help")
+    print()
+    print(col("  Select a session to preview", GRAY))
+
+def render_preview(project_short: str, sid: str):
+    """Render session content to stdout (for fzf preview pane)."""
+    help_on = os.path.exists(HELP_FLAG)
+
+    if help_on:
+        _show_help()
+        return
+
+    if not sid or not project_short:
+        return
+
+    jsonl = None
+    for p in CLAUDE_PROJECTS.iterdir():
+        if not p.is_dir():
+            continue
+        cand = p / f"{sid}.jsonl"
+        if cand.exists():
+            jsonl = cand
+            break
+    if not jsonl:
+        print(col("Session file not found", MAGENTA))
+        return
+
+    entries = parse_jsonl(jsonl)
+    if not entries:
+        return
+
+    print(col(f" {project_short}", CYAN))
+    print(col(f" {sid[:8]}…", GRAY))
+    print()
+
+    for d in entries:
+        role = d.get("type")
+        if role not in ("user", "assistant"):
+            continue
+        content = d.get("message", {}).get("content", [])
+        texts = []
+        if isinstance(content, str):
+            texts = [content]
+        elif isinstance(content, list):
+            texts = [c["text"] for c in content
+                     if isinstance(c, dict) and c.get("type") == "text"]
+        for text in texts:
+            text = text.strip()
+            if not text or text.startswith("<"):
+                continue
+            if role == "user":
+                badge = col("  you  ", f"{BG_BLUE}{CYAN}")
+            else:
+                badge = col(" claude ", f"{BG_GREEN}{GREEN}")
+            wrapped = textwrap.fill(text, width=42,
+                                    subsequent_indent="         ")
+            print(f"{badge} {WHITE}{wrapped}{RESET}")
+            print()
+
+    # summary line
+    c = count_messages(entries)
+    total = sum(c.values())
+    summary = f"── {total} msgs ({c['user']} user / {c['assistant']} asst / {c['tool']} tool) ──"
+    print(col(summary, GRAY))
+
+
+# ── commands ──────────────────────────────────────────────────────────────────
+
+def cmd_list():
+    sessions = collect_sessions()
+    if not sessions:
+        print("No sessions found.")
+        return
+    groups = {}
+    for s in sessions:
+        groups.setdefault(s["project_short"], []).append(s)
+    for proj, convs in groups.items():
+        print(f"  {col(proj, CYAN)}  {col(f'({len(convs)})', GRAY)}")
+        for s in convs:
+            label = (s["first_msg"][:58] + "…") if len(s["first_msg"]) > 58 else s["first_msg"]
+            age_s = col(f"[{s['age']:>3}]", MAGENTA)
+            msgs_s = f"{s['total_msgs']} msgs"
+            print(f"    {age_s}  {col(label, WHITE)}")
+            print(f"           {col(s['sid'], GRAY)}  {col(msgs_s, GRAY)}")
+
+
+def cmd_info(sid: str):
+    sessions = collect_sessions()
+    match = [s for s in sessions if s["sid"] == sid]
+    if not match:
+        print(f"Session {sid} not found.")
+        return
+    s = match[0]
+    print(f"  {col('Session ID', BOLD)}     {s['sid']}")
+    print(f"  {col('Project', BOLD)}        {s['project_short']}")
+    print(f"  {col('Created', BOLD)}        {s['time']} ({s['age']})")
+    print(f"  {col('Messages', BOLD)}       {s['total_msgs']} total  "
+          f"({s['counts']['user']} user / {s['counts']['assistant']} asst / "
+          f"{s['counts']['tool']} tool)")
+    print(f"  {col('File', BOLD)}           {s['path']}")
+    print()
+    print(f"  {col('First message:', BOLD)}")
+    for line in textwrap.wrap(s["first_msg"], width=72):
+        print(f"    {line}")
+
+
+def cmd_view(sid: str):
+    jsonl = None
+    for p in CLAUDE_PROJECTS.iterdir():
+        if not p.is_dir():
+            continue
+        cand = p / f"{sid}.jsonl"
+        if cand.exists():
+            jsonl = cand
+            break
+    if not jsonl:
+        print(f"Session {sid} not found.")
+        return
+
+    entries = parse_jsonl(jsonl)
+    if not entries:
+        print("Empty session.")
+        return
+
+    for d in entries:
+        role = d.get("type")
+        if role not in ("user", "assistant"):
+            continue
+        content = d.get("message", {}).get("content", [])
+        texts = []
+        if isinstance(content, str):
+            texts = [content]
+        elif isinstance(content, list):
+            texts = [c["text"] for c in content
+                     if isinstance(c, dict) and c.get("type") == "text"]
+        for c_ in (content if isinstance(content, list) else []):
+            if isinstance(c_, dict):
+                if c_.get("type") == "tool_use":
+                    inp = json.dumps(c_.get("input", {}))
+                    texts.append(f"[tool: {c_.get('name','')}] {inp[:200]}")
+                elif c_.get("type") == "tool_result":
+                    out = c_.get("content", "")
+                    if isinstance(out, list):
+                        out = " ".join(x.get("text","") for x in out if isinstance(x,dict))
+                    texts.append(f"[result] {str(out)[:200]}")
+        for text in texts:
+            text = text.strip()
+            if not text or text.startswith("<"):
+                continue
+            if role == "user":
+                badge = col("  you  ", f"{BG_BLUE}{CYAN}")
+            else:
+                badge = col(" claude ", f"{BG_GREEN}{GREEN}")
+            print(f"\n{badge}")
+            for line_ in textwrap.wrap(text, width=72, subsequent_indent="       "):
+                print(f"       {WHITE}{line_}{RESET}")
+    print()
+
+
+def cmd_search(keyword: str):
+    kw = keyword.lower()
+    sessions = collect_sessions()
+    found = False
+    for s in sessions:
+        entries = parse_jsonl(s["path"])
+        if kw in s["first_msg"].lower():
+            found = True
+            label = (s["first_msg"][:58]+"…") if len(s["first_msg"])>58 else s["first_msg"]
+            print(f"  {col(s['project_short'], CYAN)}  {col(s['sid'][:8], GRAY)}  {col(label, WHITE)}")
+            continue
+        for d in entries:
+            if d.get("type") not in ("user","assistant"):
+                continue
+            content = d.get("message",{}).get("content",[])
+            texts = []
+            if isinstance(content, str):
+                texts = [content]
+            elif isinstance(content, list):
+                texts = [c["text"] for c in content if isinstance(c,dict) and c.get("type")=="text"]
+            for text in texts:
+                if kw in text.lower():
+                    if not found:
+                        found = True
+                    label = (s["first_msg"][:48]+"…") if len(s["first_msg"])>48 else s["first_msg"]
+                    matched = ""
+                    for line_ in text.split("\n"):
+                        if kw in line_.lower():
+                            matched = line_.strip()[:72]
+                            break
+                    if not matched:
+                        matched = text.strip()[:72]
+                    print(f"  {col(s['project_short'], CYAN)}  {col(s['sid'][:8], GRAY)}  {col(label, WHITE)}")
+                    print(f"           {col(f'↳ {matched}', GRAY)}")
+                    break
+    if not found:
+        print(f"No matches for '{keyword}'.")
+
+
+# ── fzf picker (default) ─────────────────────────────────────────────────────
+
+def cmd_pick():
+    """Interactive fzf picker with preview."""
+    script_path = os.path.abspath(__file__)
+    reload_cmd = f"{sys.executable} {script_path} --emit-picker"
+
+    fzf_cmd = [
+        "fzf", "--ansi",
+        "--delimiter=\t",
+        "--with-nth=1",
+        "--nth=1",
+        "--no-sort",
+        "--layout=reverse",
+        "--border=rounded",
+        '--border-label=" 󱜚 Claude Sessions "',
+        "--border-label-pos=2",
+        "--color=border:#0ABDC6,label:#0ABDC6,header:#D300C4",
+        "--color=bg+:#111133,fg+:#ffffff,hl+:#D300C4,hl:#0ABDC6",
+        "--color=pointer:#D300C4,marker:#0ABDC6,spinner:#0ABDC6",
+        '--prompt=❯ ',
+        "--pointer=▶",
+        f"--preview={sys.executable} {script_path} --preview-line {{2}} {{4}}",
+        "--preview-window=right:45%:wrap,nohidden",
+        f"--bind=start:reload({reload_cmd})",
+        f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({reload_cmd})",
+        f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
+        '--header-lines=1',
+        "--bind=ctrl-j:down,ctrl-k:up",
+        "--bind=J:preview-down,K:preview-up",
+        "--bind=ctrl-d:preview-half-page-down,ctrl-u:preview-half-page-up",
+        "--bind=ctrl-f:preview-page-down,ctrl-b:preview-page-up",
+        "--bind=g:preview-top,G:preview-bottom",
+        "--bind=/:toggle-preview",
+    ]
+
+    result = subprocess.run(
+        fzf_cmd,
+        capture_output=True,
+        text=True,
+    )
+
+    # cleanup flags
+    for flag in (HELP_FLAG, SCOPE_FLAG):
+        if os.path.exists(flag):
+            os.remove(flag)
+
+    selected = result.stdout.strip()
+    if not selected:
+        return
+
+    # Extract hidden payload: proj_short \t proj_path \t sid
+    parts = selected.split("\t")
+    if len(parts) < 3:
+        return
+    project_short = parts[-3].strip()
+    project_path  = parts[-2].strip()
+    sid           = parts[-1].strip()
+
+    # Show session info first, then ask
+    print(f"\nSelected: {col(sid[:8]+'…', GRAY)}  {col(project_short, CYAN)}")
+    action = input(f"  {col('[r]', GREEN)} resume with claude  "
+                   f"{col('[v]', GREEN)} view content  "
+                   f"{col('[q]', GREEN)} quit: ").strip().lower()
+
+    if action == "r":
+        os.chdir(project_path)
+        os.execvp("claude", ["claude", "-r", sid])
+    elif action == "v":
+        cmd_view(sid)
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def main():
+    # Internal flags used by fzf preview/picker
+    if len(sys.argv) >= 2 and sys.argv[1] == "--emit-picker":
+        emit_picker_lines()
+        return
+    if len(sys.argv) >= 4 and sys.argv[1] == "--preview-line":
+        render_preview(sys.argv[2], sys.argv[3])
+        return
+
+    if len(sys.argv) < 2:
+        cmd_pick()
+        return
+
+    if sys.argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+
+    cmd = sys.argv[1]
+    args = sys.argv[2:]
+
+    if cmd == "list":
+        cmd_list()
+    elif cmd == "info":
+        if not args:
+            print("Usage: claude-sessions info <uuid>")
+            return
+        cmd_info(args[0])
+    elif cmd == "view":
+        if not args:
+            print("Usage: claude-sessions view <uuid>")
+            return
+        cmd_view(args[0])
+    elif cmd == "search":
+        if not args:
+            print("Usage: claude-sessions search <keyword>")
+            return
+        cmd_search(args[0])
+    elif cmd == "pick":
+        cmd_pick()
+    else:
+        print(f"Unknown command: {cmd}\n")
+        print(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main()
