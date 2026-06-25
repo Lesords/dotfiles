@@ -162,11 +162,8 @@ def emit_picker_lines():
                     if str(cwd) in str(s["project"])]
 
     # Header line (sticky via --header-lines=1)
-    if scope_on:
-        label = f"^A: show all"
-    else:
-        label = f"^A: {cwd.name}"
-    print(col(f"  ?  toggle help  |  {label}", GRAY))
+    scope_label = cwd.name if scope_on else "all"
+    print(col(f"  {scope_label}  |  ? toggle help", GRAY))
     groups = {}
     for s in sessions:
         groups.setdefault(s["project_short"], []).append(s)
@@ -186,13 +183,15 @@ def emit_picker_lines():
 def _show_help():
     print(col("  Keybindings", BOLD))
     print()
-    print(f"  {col('Enter', GREEN)}   resume session")
-    print(f"  {col('Esc', GREEN)}    close picker")
-    print(f"  {col('J/K', GREEN)}    scroll preview")
-    print(f"  {col('g/G', GREEN)}    preview top/bottom")
-    print(f"  {col('^D/^U', GREEN)}  preview half-page")
-    print(f"  {col('/', GREEN)}      toggle preview pane")
-    print(f"  {col('?', GREEN)}      toggle this help")
+    print(f"  {col('Enter', GREEN)}  resume session")
+    print(f"  {col('^A', GREEN)}     toggle scope")
+    print(f"  {col('^V', GREEN)}     toggle full preview")
+    print(f"  {col('J/K', GREEN)}   scroll preview")
+    print(f"  {col('g/G', GREEN)}   preview top/bottom")
+    print(f"  {col('^D/^U', GREEN)} preview half-page")
+    print(f"  {col('/', GREEN)}     toggle preview pane")
+    print(f"  {col('?', GREEN)}     toggle this help")
+    print(f"  {col('^C/^Q', GREEN)} close picker")
     print()
     print(col("  Select a session to preview", GRAY))
 
@@ -395,27 +394,30 @@ def cmd_search(keyword: str):
 def cmd_pick():
     """Interactive fzf picker with preview."""
     script_path = os.path.abspath(__file__)
-    reload_cmd = f"{sys.executable} {script_path} --emit-picker"
+
+    picker_data = subprocess.run(
+        [sys.executable, script_path, "--emit-picker"],
+        capture_output=True, text=True,
+    ).stdout
+
+    if not picker_data.strip():
+        print("No sessions found.")
+        return
 
     fzf_cmd = [
         "fzf", "--ansi",
+        "--height=100%",
         "--delimiter=\t",
-        "--with-nth=1",
-        "--nth=1",
-        "--no-sort",
-        "--layout=reverse",
-        "--border=rounded",
-        '--border-label=" 󱜚 Claude Sessions "',
-        "--border-label-pos=2",
+        "--with-nth=1", "--nth=1",
+        "--no-sort", "--layout=reverse", "--border=rounded",
+        '--border-label=" 󱜚 Claude Sessions "', "--border-label-pos=2",
         "--color=border:#0ABDC6,label:#0ABDC6,header:#D300C4",
         "--color=bg+:#111133,fg+:#ffffff,hl+:#D300C4,hl:#0ABDC6",
         "--color=pointer:#D300C4,marker:#0ABDC6,spinner:#0ABDC6",
-        '--prompt=❯ ',
-        "--pointer=▶",
+        '--prompt=❯ ', "--pointer=▶",
         f"--preview={sys.executable} {script_path} --preview-line {{2}} {{4}}",
         "--preview-window=right:45%:wrap,nohidden",
-        f"--bind=start:reload({reload_cmd})",
-        f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({reload_cmd})",
+        f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({sys.executable} {script_path} --emit-picker)",
         f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
         '--header-lines=1',
         "--bind=ctrl-j:down,ctrl-k:up",
@@ -424,42 +426,35 @@ def cmd_pick():
         "--bind=ctrl-f:preview-page-down,ctrl-b:preview-page-up",
         "--bind=g:preview-top,G:preview-bottom",
         "--bind=/:toggle-preview",
+        "--bind=ctrl-v:change-preview-window(right:45%|up:99%)",
     ]
 
     result = subprocess.run(
-        fzf_cmd,
-        capture_output=True,
+        fzf_cmd + ["--expect=enter,esc"],
+        input=picker_data,
+        stdout=subprocess.PIPE,
         text=True,
     )
 
-    # cleanup flags
     for flag in (HELP_FLAG, SCOPE_FLAG):
         if os.path.exists(flag):
             os.remove(flag)
 
-    selected = result.stdout.strip()
-    if not selected:
+    output = result.stdout.strip()
+    if not output:
         return
 
-    # Extract hidden payload: proj_short \t proj_path \t sid
-    parts = selected.split("\t")
-    if len(parts) < 3:
-        return
-    project_short = parts[-3].strip()
-    project_path  = parts[-2].strip()
-    sid           = parts[-1].strip()
+    idx = output.find("\n")
+    key = output[:idx] if idx >= 0 else output
+    selected = output[idx + 1:] if idx >= 0 else ""
 
-    # Show session info first, then ask
-    print(f"\nSelected: {col(sid[:8]+'…', GRAY)}  {col(project_short, CYAN)}")
-    action = input(f"  {col('[r]', GREEN)} resume with claude  "
-                   f"{col('[v]', GREEN)} view content  "
-                   f"{col('[q]', GREEN)} quit: ").strip().lower()
-
-    if action == "r":
-        os.chdir(project_path)
-        os.execvp("claude", ["claude", "-r", sid])
-    elif action == "v":
-        cmd_view(sid)
+    if key == "enter" and selected:
+        parts = selected.split("\t")
+        if len(parts) >= 4:
+            project_path = parts[-2].strip()
+            sid = parts[-1].strip()
+            os.chdir(project_path)
+            os.execvp("claude", ["claude", "-r", sid])
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
