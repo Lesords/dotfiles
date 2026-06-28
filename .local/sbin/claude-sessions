@@ -118,9 +118,33 @@ def format_time(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
 
 
+def load_history_displays() -> dict[str, str]:
+    """Read history.jsonl and return {sessionId: latest_non_command_display}."""
+    history = Path.home() / ".claude" / "history.jsonl"
+    if not history.exists():
+        return {}
+    displays = {}
+    try:
+        with open(history) as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                d = json.loads(line)
+                sid = d.get("sessionId")
+                display = d.get("display", "")
+                ts = d.get("timestamp", 0)
+                if sid and display and not display.startswith("/"):
+                    if sid not in displays or ts > displays[sid][0]:
+                        displays[sid] = (ts, display)
+    except Exception:
+        return {}
+    return {sid: info[1] for sid, info in displays.items()}
+
+
 def collect_sessions():
     if not CLAUDE_PROJECTS.exists():
         return []
+    history_displays = load_history_displays()
     sessions = []
     for p in sorted(CLAUDE_PROJECTS.iterdir()):
         if not p.is_dir():
@@ -136,9 +160,11 @@ def collect_sessions():
             if not msg:
                 continue
             mtime = f.stat().st_mtime
+            display = history_displays.get(f.stem, msg)
             sessions.append({
                 "sid": f.stem, "project": real or Path(),
                 "project_short": short, "first_msg": msg,
+                "display": display,
                 "mtime": mtime, "age": session_age(mtime),
                 "time": format_time(mtime),
                 "counts": count_messages(entries),
@@ -172,7 +198,8 @@ def emit_picker_lines():
         count = len(convs)
         print(f"  {col(proj, CYAN)}  {col(f'({count})', GRAY)}")
         for s in convs:
-            label = (s["first_msg"][:58] + "…") if len(s["first_msg"]) > 58 else s["first_msg"]
+            d = s.get("display", s["first_msg"])
+            label = (d[:58] + "…") if len(d) > 58 else d
             age_s = col(f"[{s['age']:>3}]", MAGENTA)
             proj_path = str(s["project"])
             print(f"    {age_s}  {col(label, WHITE)}\t{s['project_short']}\t{proj_path}\t{s['sid']}")
@@ -241,14 +268,14 @@ def render_preview(project_short: str, sid: str):
             text = text.strip()
             if not text or text.startswith("<"):
                 continue
-            if role == "user":
-                badge = col("  you  ", f"{BG_BLUE}{CYAN}")
-            else:
-                badge = col(" claude ", f"{BG_GREEN}{GREEN}")
+            label = col("You", CYAN) if role == "user" else col("Claude", GREEN)
             wrapped = textwrap.fill(text, width=42,
-                                    subsequent_indent="         ")
-            print(f"{badge} {WHITE}{wrapped}{RESET}")
+                                    subsequent_indent="       ")
+            print(f" {label}")
+            print(f"       {WHITE}{wrapped}{RESET}")
             print()
+            print(f"       {WHITE}{wrapped}{RESET}")
+        print()
 
     # summary line
     c = count_messages(entries)
@@ -270,7 +297,8 @@ def cmd_list():
     for proj, convs in groups.items():
         print(f"  {col(proj, CYAN)}  {col(f'({len(convs)})', GRAY)}")
         for s in convs:
-            label = (s["first_msg"][:58] + "…") if len(s["first_msg"]) > 58 else s["first_msg"]
+            d = s.get("display", s["first_msg"])
+            label = (d[:58] + "…") if len(d) > 58 else d
             age_s = col(f"[{s['age']:>3}]", MAGENTA)
             msgs_s = f"{s['total_msgs']} msgs"
             print(f"    {age_s}  {col(label, WHITE)}")
@@ -374,7 +402,8 @@ def cmd_search(keyword: str):
                 if kw in text.lower():
                     if not found:
                         found = True
-                    label = (s["first_msg"][:48]+"…") if len(s["first_msg"])>48 else s["first_msg"]
+                    d = s.get("display", s["first_msg"])
+                    label = (d[:48]+"…") if len(d)>48 else d
                     matched = ""
                     for line_ in text.split("\n"):
                         if kw in line_.lower():
