@@ -389,7 +389,7 @@ def cmd_search(keyword: str):
             label = (s["first_msg"][:58]+"…") if len(s["first_msg"])>58 else s["first_msg"]
             print(f"  {col(s['project_short'], CYAN)}  {col(s['sid'][:8], GRAY)}  {col(label, WHITE)}")
             continue
-        for d in entries:
+    for d in entries:
             if d.get("type") not in ("user","assistant"):
                 continue
             content = d.get("message",{}).get("content",[])
@@ -445,7 +445,7 @@ def cmd_pick():
         "--color=pointer:#D300C4,marker:#0ABDC6,spinner:#0ABDC6",
         '--prompt=❯ ', "--pointer=▶",
         f"--preview={sys.executable} {script_path} --preview-line {{2}} {{4}}",
-        "--preview-window=right:45%:wrap,nohidden",
+        "--preview-window=right:45%:wrap,nohidden,follow",
         f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({sys.executable} {script_path} --emit-picker)",
         f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
         '--header-lines=1',
