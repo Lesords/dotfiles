@@ -384,12 +384,15 @@ def cmd_search(keyword: str):
     found = False
     for s in sessions:
         entries = parse_jsonl(s["path"])
+        # Check session title/first message
         if kw in s["first_msg"].lower():
             found = True
             label = (s["first_msg"][:58]+"…") if len(s["first_msg"])>58 else s["first_msg"]
             print(f"  {col(s['project_short'], CYAN)}  {col(s['sid'][:8], GRAY)}  {col(label, WHITE)}")
             continue
-    for d in entries:
+        # Search within session content
+        display_or_title = s.get("display", s["first_msg"])
+        for d in entries:
             if d.get("type") not in ("user","assistant"):
                 continue
             content = d.get("message",{}).get("content",[])
@@ -402,8 +405,7 @@ def cmd_search(keyword: str):
                 if kw in text.lower():
                     if not found:
                         found = True
-                    d = s.get("display", s["first_msg"])
-                    label = (d[:48]+"…") if len(d)>48 else d
+                    label = (display_or_title[:48]+"…") if len(display_or_title)>48 else display_or_title
                     matched = ""
                     for line_ in text.split("\n"):
                         if kw in line_.lower():
