@@ -271,6 +271,7 @@ def render_preview(project_short: str, sid: str):
         elif isinstance(content, list):
             texts = [c["text"] for c in content
                      if isinstance(c, dict) and c.get("type") == "text"]
+        printed = False
         for text in texts:
             text = text.strip()
             if not text or text.startswith("<"):
@@ -280,9 +281,9 @@ def render_preview(project_short: str, sid: str):
                                     subsequent_indent="       ")
             print(f" {label}")
             print(f"       {WHITE}{wrapped}{RESET}")
+            printed = True
+        if printed:
             print()
-            print(f"       {WHITE}{wrapped}{RESET}")
-        print()
 
     # summary line
     c = count_messages(entries)
