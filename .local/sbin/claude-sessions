@@ -12,6 +12,7 @@ claude-sessions — 交互式浏览/查看 Claude Code session
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -25,6 +26,15 @@ CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 HELP_FLAG = "/tmp/.claude-sessions-help"
 SCOPE_FLAG = "/tmp/.claude-sessions-scope"
 
+# Markdown renderer — glow > bat > plain text
+_RENDER: tuple | None = None
+for _cmd, _args in [("glow", ["-", "--style=dark", "--width=72"]),
+                    ("bat", ["-l", "md", "--style=plain", "--color=always",
+                             "--terminal-width=72"])]:
+    if _p := shutil.which(_cmd):
+        _RENDER = (_p, _args)
+        break
+
 # ── ANSI colors ───────────────────────────────────────────────────────────────
 
 CYAN    = "\033[38;5;45m"
@@ -36,8 +46,13 @@ WHITE   = "\033[38;5;252m"
 BOLD    = "\033[1m"
 RESET   = "\033[0m"
 
-BG_BLUE  = "\033[48;5;18m"
+BG_BLUE  = "\033[48;5;24m"
 BG_GREEN = "\033[48;5;22m"
+BG_GRAY  = "\033[48;5;236m"
+
+_BADGE_YOU = f"{BG_BLUE}{CYAN}  You  {RESET}"
+_BADGE_CLAUDE = f"{BG_GREEN}{GREEN} Claude {RESET}"
+_BADGE_TOOL = f"{BG_GRAY}{YELLOW} Tool {RESET}"
 
 
 def col(s, c):
@@ -131,6 +146,15 @@ def count_messages(entries: list[dict]) -> dict:
     for d in entries:
         c[d.get("type", "other")] = c.get(d.get("type", "other"), 0) + 1
     return c
+
+
+def render_markdown(text: str) -> str:
+    if not _RENDER: return text
+    cmd, args = _RENDER
+    try:
+        r = subprocess.run([cmd, *args], input=text, capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or text
+    except Exception: return text
 
 
 def session_age(mtime: float) -> str:
@@ -262,26 +286,50 @@ def render_preview(project_short: str, sid: str):
 
     for d in entries:
         role = d.get("type")
-        if role not in ("user", "assistant"):
+        if role not in ("user", "assistant", "tool"):
             continue
         content = d.get("message", {}).get("content", [])
-        texts = []
         if isinstance(content, str):
-            texts = [content]
-        elif isinstance(content, list):
-            texts = [c["text"] for c in content
-                     if isinstance(c, dict) and c.get("type") == "text"]
+            content = [{"type": "text", "text": content}]
+
+        if role == "tool":
+            role_label = _BADGE_TOOL
+        elif role == "user":
+            has_text = any(
+                isinstance(b, dict) and b.get("type") == "text"
+                and (t := b.get("text", "").strip()) and not t.startswith("<")
+                for b in content
+            )
+            role_label = _BADGE_YOU if has_text else _BADGE_TOOL
+        else:
+            role_label = _BADGE_CLAUDE
+
         printed = False
-        for text in texts:
-            text = text.strip()
-            if not text or text.startswith("<"):
+        for block in (content if isinstance(content, list) else []):
+            if not isinstance(block, dict):
                 continue
-            label = col("You", CYAN) if role == "user" else col("Claude", GREEN)
-            wrapped = textwrap.fill(text, width=42,
-                                    subsequent_indent="       ")
-            print(f" {label}")
-            print(f"       {WHITE}{wrapped}{RESET}")
-            printed = True
+            t = block.get("type")
+            lines = None
+            if t == "text":
+                text = block.get("text", "").strip()
+                if text and not text.startswith("<"):
+                    lines = render_markdown(text).split("\n")
+            elif t == "tool_use":
+                lines = [col(f'[{block.get("name", "?")}]', GRAY)]
+            elif t == "tool_result":
+                out = block.get("content", "")
+                if isinstance(out, list):
+                    out = " ".join(x.get("text", "") for x in out if isinstance(x, dict))
+                out = str(out).strip()[:60]
+                if out:
+                    lines = [col(out, GRAY)]
+            if not lines:
+                continue
+            if not printed:
+                print(f" {role_label}")
+                printed = True
+            for l in lines:
+                print(f"       {l}")
         if printed:
             print()
 
