@@ -1,0 +1,597 @@
+#!/usr/bin/env python3
+"""
+codex-sessions — 交互式浏览/恢复 Codex CLI session
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import textwrap
+import time
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+
+CODEX_HOME = Path.home() / ".codex"
+HELP_FLAG = "/tmp/.codex-sessions-help"
+SCOPE_FLAG = "/tmp/.codex-sessions-scope"
+
+_RENDER: tuple | None = None
+for _cmd, _args in [("glow", ["-", "--style=dark", "--width=72"]),
+                    ("bat", ["-l", "md", "--style=plain", "--color=always",
+                             "--terminal-width=72"])]:
+    if _p := shutil.which(_cmd):
+        _RENDER = (_p, _args)
+        break
+
+CYAN    = "\033[38;5;45m"
+MAGENTA = "\033[38;5;201m"
+GRAY    = "\033[38;5;242m"
+GREEN   = "\033[38;5;84m"
+YELLOW  = "\033[38;5;220m"
+WHITE   = "\033[38;5;252m"
+BOLD    = "\033[1m"
+RESET   = "\033[0m"
+
+BG_BLUE  = "\033[48;5;24m"
+BG_GREEN = "\033[48;5;22m"
+BG_GRAY  = "\033[48;5;236m"
+
+_BADGE_YOU   = f"{BG_BLUE}{CYAN}  You  {RESET}"
+_BADGE_CODEX = f"{BG_GREEN}{GREEN} Codex {RESET}"
+_BADGE_TOOL  = f"{BG_GRAY}{YELLOW} Tool {RESET}"
+
+
+def col(s, c):
+    return f"{c}{s}{RESET}"
+
+
+def parse_jsonl(path: Path) -> list[dict]:
+    try:
+        with open(path) as f:
+            return [json.loads(l) for l in f if l.strip()]
+    except Exception:
+        return []
+
+
+def render_markdown(text: str) -> str:
+    if not _RENDER: return text
+    cmd, args = _RENDER
+    try:
+        r = subprocess.run([cmd, *args], input=text, capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or text
+    except Exception: return text
+
+
+def session_age(mtime: float) -> str:
+    s = int(time.time() - mtime)
+    if s < 60: return "now"
+    if s < 3600: return f"{s // 60}m"
+    if s < 86400: return f"{s // 3600}h"
+    return f"{s // 86400}d"
+
+
+def format_time(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
+
+
+def load_session_index() -> dict[str, str]:
+    path = CODEX_HOME / "session_index.jsonl"
+    if not path.exists():
+        return {}
+    result: dict[str, str] = {}
+    for d in parse_jsonl(path):
+        sid = d.get("id", "")
+        name = d.get("thread_name", "")
+        if sid and name:
+            result[sid] = name
+    return result
+
+
+def load_history_prompts() -> dict[str, str]:
+    path = CODEX_HOME / "history.jsonl"
+    if not path.exists():
+        return {}
+    result: dict[str, str] = {}
+    for d in parse_jsonl(path):
+        sid = d.get("session_id", "")
+        text = d.get("text", "").strip()
+        if not sid or not text:
+            continue
+        if text.startswith(">"):
+            continue
+        if sid not in result:
+            result[sid] = text
+    return result
+
+
+_session_id_re = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+
+
+def _extract_sid(filename: str) -> str | None:
+    m = _session_id_re.search(filename)
+    return m.group(0) if m else None
+
+
+def _get_cwd(entries: list[dict]) -> str:
+    for d in entries:
+        if d.get("type") == "session_meta":
+            cwd = d.get("payload", {}).get("cwd", "")
+            if cwd:
+                return cwd
+    return ""
+
+
+def count_messages(entries: list[dict]) -> dict:
+    c = {"user": 0, "assistant": 0, "tool": 0}
+    for d in entries:
+        if d.get("type") != "response_item":
+            continue
+        pt = d.get("payload", {}).get("type")
+        role = d.get("payload", {}).get("role")
+        if pt == "message" and role == "user":
+            c["user"] += 1
+        elif pt == "message" and role == "assistant":
+            c["assistant"] += 1
+        elif pt in ("function_call", "function_call_output",
+                    "custom_tool_call", "custom_tool_call_output"):
+            c["tool"] += 1
+    return c
+
+
+def collect_sessions():
+    if not CODEX_HOME.exists():
+        return []
+    titles = load_session_index()
+    prompts = load_history_prompts()
+    sessions = []
+
+    for year_dir in sorted(CODEX_HOME.glob("sessions/????")):
+        for month_dir in sorted(year_dir.glob("??")):
+            for day_dir in sorted(month_dir.glob("??")):
+                for f in sorted(day_dir.glob("*.jsonl"),
+                                key=lambda x: x.stat().st_mtime, reverse=True):
+                    sid = _extract_sid(f.name)
+                    if not sid:
+                        continue
+
+                    display = titles.get(sid) or prompts.get(sid) or sid[:8]
+                    mtime = f.stat().st_mtime
+                    entries = parse_jsonl(f)
+                    cwd = _get_cwd(entries)
+                    short = str(cwd).replace(str(Path.home()), "~") if cwd else "?"
+
+                    sessions.append({
+                        "sid": sid,
+                        "display": display,
+                        "cwd": cwd,
+                        "project_short": short,
+                        "mtime": mtime,
+                        "age": session_age(mtime),
+                        "time": format_time(mtime),
+                        "path": f,
+                    })
+    return sessions
+
+
+def emit_picker_lines():
+    sessions = collect_sessions()
+    if not sessions:
+        return
+
+    scope_on = os.path.exists(SCOPE_FLAG)
+    cwd = Path.cwd()
+
+    if scope_on:
+        sessions = [s for s in sessions
+                    if str(cwd) in str(s["cwd"])]
+
+    scope_label = cwd.name if scope_on else "all"
+    print(col(f"  {scope_label}  |  ? toggle help", GRAY))
+    groups = defaultdict(list)
+    for s in sessions:
+        groups[s["project_short"]].append(s)
+
+    for proj, convs in sorted(groups.items()):
+        print(f"  {col(proj, CYAN)}  {col(f'({len(convs)})', GRAY)}")
+        for s in convs:
+            disp = " ".join(s["display"].split())
+            label = (disp[:58] + "\u2026") if len(disp) > 58 else disp
+            age_s = col(f"[{s['age']:>3}]", MAGENTA)
+            print(f"    {age_s}  {col(label, WHITE)}\t{s['project_short']}\t{s['cwd']}\t{s['sid']}\t{disp}")
+
+
+def _show_help():
+    print(col("  Keybindings", BOLD))
+    print()
+    print(f"  {col('Enter', GREEN)}  resume session")
+    print(f"  {col('J/K', GREEN)}   scroll preview")
+    print(f"  {col('g/G', GREEN)}   preview top/bottom")
+    print(f"  {col('^D/^U', GREEN)} preview half-page")
+    print(f"  {col('/', GREEN)}     toggle preview pane")
+    print(f"  {col('?', GREEN)}     toggle this help")
+    print(f"  {col('^C/^Q', GREEN)} close picker")
+    print()
+    print(col("  Select a session to preview", GRAY))
+
+
+def _parse_cmd_arg(args: str) -> str:
+    try:
+        return json.loads(args).get("cmd", "?")
+    except Exception:
+        return "?"
+
+
+def _get_session_meta(entries: list[dict]) -> dict:
+    for d in entries:
+        if d.get("type") == "session_meta":
+            p = d.get("payload", {})
+            return {
+                "model_provider": p.get("model_provider", ""),
+                "cli_version": p.get("cli_version", ""),
+                "originator": p.get("originator", ""),
+            }
+    return {}
+
+
+def render_preview(project_short: str, sid: str, display_name: str = ""):
+    if os.path.exists(HELP_FLAG):
+        _show_help()
+        return
+
+    if not sid:
+        return
+
+    jsonl = None
+    for year_dir in CODEX_HOME.glob("sessions/????"):
+        for month_dir in sorted(year_dir.glob("??")):
+            for day_dir in sorted(month_dir.glob("??")):
+                for f in day_dir.glob("*.jsonl"):
+                    if sid in f.name:
+                        jsonl = f
+                        break
+    if not jsonl:
+        print(col("Session file not found", MAGENTA))
+        return
+
+    entries = parse_jsonl(jsonl)
+    if not entries:
+        return
+
+    meta = _get_session_meta(entries)
+    if display_name:
+        title = " ".join(display_name.split())
+        if len(title) > 72:
+            title = title[:69] + "\u2026"
+        print(col(f" {title}", BOLD))
+    parts = [project_short]
+    if meta.get("model_provider"):
+        parts.append(meta["model_provider"])
+    if meta.get("cli_version"):
+        parts.append(meta["cli_version"])
+    print(col(f" {'  '.join(parts)}", CYAN))
+    print()
+
+    for d in entries:
+        if d.get("type") != "response_item":
+            continue
+        p = d.get("payload", {})
+        pt = p.get("type")
+        role = p.get("role")
+
+        if pt == "message" and role == "user":
+            texts = _get_input_texts(p.get("content", []))
+            if not texts:
+                continue
+            print(f" {_BADGE_YOU}")
+            for text in texts:
+                for line in _split_text(text):
+                    print(f"       {line}")
+            print()
+
+        elif pt == "message" and role == "assistant":
+            texts = _get_output_texts(p.get("content", []))
+            if not texts:
+                continue
+            print(f" {_BADGE_CODEX}")
+            for text in texts:
+                rendered = render_markdown(text)
+                for line in rendered.split("\n"):
+                    print(f"       {line}")
+            print()
+
+        elif pt in ("function_call", "custom_tool_call"):
+            name = p.get("name", "?")
+            if pt == "function_call" and name == "exec_command":
+                cmd = _parse_cmd_arg(p.get("arguments", ""))
+                name = cmd[:40] + "\u2026" if len(cmd) > 40 else cmd
+            print(f" {_BADGE_TOOL}")
+            print(f"       {col(f'\u21b3 {name}', GRAY)}")
+
+    c = count_messages(entries)
+    total = sum(c.values())
+    summary = f"\u2500\u2500 {total} msgs ({c['user']} user / {c['assistant']} asst / {c['tool']} tool) \u2500\u2500"
+    print(col(summary, GRAY))
+
+
+def _get_input_texts(content):
+    texts = []
+    for c in content if isinstance(content, list) else []:
+        if isinstance(c, dict) and c.get("type") == "input_text":
+            t = c.get("text", "").strip()
+            if t and not t.startswith("<"):
+                texts.append(t)
+    return texts
+
+
+def _get_output_texts(content):
+    texts = []
+    for c in content if isinstance(content, list) else []:
+        if isinstance(c, dict) and c.get("type") == "output_text":
+            t = c.get("text", "").strip()
+            if t:
+                texts.append(t)
+    return texts
+
+
+def _split_text(text: str) -> list[str]:
+    first = True
+    lines = []
+    for line in text.split("\n"):
+        line = line.rstrip()
+        if not line:
+            if first:
+                continue
+            lines.append("")
+            continue
+        first = False
+        lines.append(line)
+    return lines
+
+
+def cmd_list():
+    sessions = collect_sessions()
+    if not sessions:
+        print("No sessions found.")
+        return
+    groups = defaultdict(list)
+    for s in sessions:
+        groups[s["project_short"]].append(s)
+    for proj, convs in sorted(groups.items()):
+        print(f"  {col(proj, CYAN)}  {col(f'({len(convs)})', GRAY)}")
+        for s in convs:
+            d = s["display"]
+            label = (d[:58] + "\u2026") if len(d) > 58 else d
+            age_s = col(f"[{s['age']:>3}]", MAGENTA)
+            print(f"    {age_s}  {col(label, WHITE)}")
+            print(f"           {col(s['sid'], GRAY)}")
+
+
+def cmd_info(sid: str):
+    sessions = collect_sessions()
+    match = [s for s in sessions if s["sid"] == sid]
+    if not match:
+        print(f"Session {sid} not found.")
+        return
+    s = match[0]
+    print(f"  {col('Session ID', BOLD)}     {s['sid']}")
+    print(f"  {col('CWD', BOLD)}             {s['project_short']}")
+    print(f"  {col('Modified', BOLD)}        {s['time']} ({s['age']})")
+    print(f"  {col('File', BOLD)}            {s['path']}")
+    print()
+    print(f"  {col('Title:', BOLD)}")
+    for line in textwrap.wrap(s["display"], width=72):
+        print(f"    {line}")
+
+
+def cmd_view(sid: str):
+    jsonl = None
+    for year_dir in CODEX_HOME.glob("sessions/????"):
+        for month_dir in sorted(year_dir.glob("??")):
+            for day_dir in sorted(month_dir.glob("??")):
+                for f in day_dir.glob("*.jsonl"):
+                    if sid in f.name:
+                        jsonl = f
+                        break
+    if not jsonl:
+        print(f"Session {sid} not found.")
+        return
+
+    entries = parse_jsonl(jsonl)
+    if not entries:
+        print("Empty session.")
+        return
+
+    for d in entries:
+        if d.get("type") != "response_item":
+            continue
+        p = d.get("payload", {})
+        pt = p.get("type")
+        role = p.get("role")
+
+        if pt == "message" and role == "user":
+            texts = _get_input_texts(p.get("content", []))
+            for text in texts:
+                text = text.strip()
+                if not text:
+                    continue
+                print(f"\n{col('  you  ', f'{BG_BLUE}{CYAN}')}")
+                for line_ in textwrap.wrap(text, width=72, subsequent_indent="       "):
+                    print(f"       {WHITE}{line_}{RESET}")
+
+        elif pt == "message" and role == "assistant":
+            texts = _get_output_texts(p.get("content", []))
+            for text in texts:
+                text = text.strip()
+                if not text:
+                    continue
+                print(f"\n{col(' codex ', f'{BG_GREEN}{GREEN}')}")
+                for line_ in textwrap.wrap(text, width=72, subsequent_indent="       "):
+                    print(f"       {WHITE}{line_}{RESET}")
+    print()
+
+
+def cmd_search(keyword: str):
+    kw = keyword.lower()
+    sessions = collect_sessions()
+    found = False
+    for s in sessions:
+        display = s["display"]
+        if kw in display.lower():
+            found = True
+            label = (display[:58] + "\u2026") if len(display) > 58 else display
+            print(f"  {col(s['project_short'], CYAN)}  {col(s['sid'][:8], GRAY)}  {col(label, WHITE)}")
+            continue
+        entries = parse_jsonl(s["path"])
+        for d in entries:
+            if d.get("type") != "response_item":
+                continue
+            p = d.get("payload", {})
+            if p.get("type") != "message":
+                continue
+            content = p.get("content", [])
+            for c in content if isinstance(content, list) else []:
+                text = (c.get("text", "") if isinstance(c, dict) else "")
+                if kw in text.lower():
+                    if not found:
+                        found = True
+                    label = (display[:48] + "\u2026") if len(display) > 48 else display
+                    matched = ""
+                    for line_ in text.split("\n"):
+                        if kw in line_.lower():
+                            matched = line_.strip()[:72]
+                            break
+                    if not matched:
+                        matched = text.strip()[:72]
+                    print(f"  {col(s['project_short'], CYAN)}  {col(s['sid'][:8], GRAY)}  {col(label, WHITE)}")
+                    print(f"           {col(f'\u21b3 {matched}', GRAY)}")
+                    break
+    if not found:
+        print(f"No matches for '{keyword}'.")
+
+
+def cmd_pick():
+    script_path = os.path.abspath(__file__)
+
+    picker_data = subprocess.run(
+        [sys.executable, script_path, "--emit-picker"],
+        capture_output=True, text=True,
+    ).stdout
+
+    if not picker_data.strip():
+        print("No sessions found.")
+        return
+
+    fzf_cmd = [
+        "fzf", "--ansi",
+        "--height=100%",
+        "--delimiter=\t",
+        "--with-nth=1", "--nth=1",
+        "--no-sort", "--layout=reverse", "--border=rounded",
+        '--border-label=" Codex Sessions "', "--border-label-pos=2",
+        "--color=border:#0ABDC6,label:#0ABDC6,header:#D300C4",
+        "--color=bg+:#111133,fg+:#ffffff,hl+:#D300C4,hl:#0ABDC6",
+        "--color=pointer:#D300C4,marker:#0ABDC6,spinner:#0ABDC6",
+        '--prompt=\u276f ', "--pointer=\u25b6",
+        f"--preview={sys.executable} {script_path} --preview-line {{2}} {{4}} {{5}}",
+        "--preview-window=right:45%:wrap,nohidden,follow",
+        f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
+        f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({sys.executable} {script_path} --emit-picker)",
+        '--header-lines=1',
+        "--bind=ctrl-j:down,ctrl-k:up",
+        "--bind=J:preview-down,K:preview-up",
+        "--bind=ctrl-d:preview-half-page-down,ctrl-u:preview-half-page-up",
+        "--bind=ctrl-f:preview-page-down,ctrl-b:preview-page-up",
+        "--bind=g:preview-top,G:preview-bottom",
+        "--bind=/:toggle-preview",
+        "--bind=ctrl-v:change-preview-window(right:45%|up:99%)",
+    ]
+
+    result = subprocess.run(
+        fzf_cmd + ["--expect=enter,esc"],
+        input=picker_data,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+
+    for flag in (HELP_FLAG, SCOPE_FLAG):
+        if os.path.exists(flag):
+            os.remove(flag)
+
+    output = result.stdout.strip()
+    if not output:
+        return
+
+    idx = output.find("\n")
+    key = output[:idx] if idx >= 0 else output
+    selected = output[idx + 1:] if idx >= 0 else ""
+
+    if key == "enter" and selected:
+        parts = selected.split("\t")
+        if len(parts) >= 4:
+            sid = parts[3].strip()
+            cwd = parts[2].strip()
+            if cwd and os.path.isdir(cwd):
+                os.chdir(cwd)
+            os.execvp("codex", ["codex", "resume", sid])
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--emit-picker":
+        emit_picker_lines()
+        return
+    if len(sys.argv) >= 4 and sys.argv[1] == "--preview-line":
+        display_name = sys.argv[4] if len(sys.argv) >= 5 else ""
+        render_preview(sys.argv[2], sys.argv[3], display_name)
+        return
+
+    if len(sys.argv) < 2:
+        cmd_pick()
+        return
+
+    if sys.argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+
+    cmd = sys.argv[1]
+    args = sys.argv[2:]
+
+    if cmd == "list": cmd_list()
+    elif cmd == "info":
+        if not args:
+            print("Usage: codex-sessions info <uuid>")
+            return
+        cmd_info(args[0])
+    elif cmd == "view":
+        if not args:
+            print("Usage: codex-sessions view <uuid>")
+            return
+        cmd_view(args[0])
+    elif cmd == "search":
+        if not args:
+            print("Usage: codex-sessions search <keyword>")
+            return
+        cmd_search(args[0])
+    elif cmd == "preview":
+        if not args:
+            print("Usage: codex-sessions preview <uuid>")
+            return
+        sessions = collect_sessions()
+        match = [s for s in sessions if s["sid"] == args[0]]
+        if match:
+            render_preview(match[0]["project_short"], args[0], match[0]["display"])
+        else:
+            render_preview("?", args[0])
+    elif cmd == "pick": cmd_pick()
+    else:
+        print(f"Unknown command: {cmd}\n")
+        print(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main()
