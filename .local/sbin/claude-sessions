@@ -506,6 +506,7 @@ def cmd_pick():
         "--preview-window=right:45%:wrap,nohidden,follow",
         f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({sys.executable} {script_path} --emit-picker)",
         f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
+        '--header=\x1b[2mCtrl+T: codex-sessions\x1b[0m  \x1b[2mCtrl+A: scope  Ctrl+V: layout\x1b[0m',
         '--header-lines=1',
         "--bind=ctrl-j:down,ctrl-k:up",
         "--bind=J:preview-down,K:preview-up",
@@ -514,6 +515,7 @@ def cmd_pick():
         "--bind=g:preview-top,G:preview-bottom",
         "--bind=/:toggle-preview",
         "--bind=ctrl-v:change-preview-window(right:45%|up:99%)",
+        '--bind=ctrl-t:become(codex-sessions)',
     ]
 
     result = subprocess.run(

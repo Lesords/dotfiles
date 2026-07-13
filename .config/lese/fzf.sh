@@ -43,6 +43,15 @@ function fd-vim() {
     fd $1 | fzf --bind 'enter:become(vim {})'
 }
 
+ai-session() {
+    local tools=(
+        "claude-sessions"
+        "codex-sessions"
+    )
+    local choice=$(printf "%s\n" "${tools[@]}" | fzf --no-preview --prompt="AI session> " --height=6 --layout=reverse --border --cycle)
+    [ -n "$choice" ] && "$choice"
+}
+
 if type fzf >/dev/null 2>&1; then
     eval "$(fzf --bash)"
 
