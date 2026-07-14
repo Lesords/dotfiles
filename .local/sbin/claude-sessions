@@ -515,11 +515,10 @@ def cmd_pick():
         "--bind=g:preview-top,G:preview-bottom",
         "--bind=/:toggle-preview",
         "--bind=ctrl-v:change-preview-window(right:45%|up:99%)",
-        '--bind=ctrl-t:become(codex-sessions)',
     ]
 
     result = subprocess.run(
-        fzf_cmd + ["--expect=enter,esc"],
+        fzf_cmd + ["--expect=enter,esc,ctrl-t"],
         input=picker_data,
         stdout=subprocess.PIPE,
         text=True,
@@ -537,7 +536,9 @@ def cmd_pick():
     key = output[:idx] if idx >= 0 else output
     selected = output[idx + 1:] if idx >= 0 else ""
 
-    if key == "enter" and selected:
+    if key == "ctrl-t":
+        os.execvp("codex-sessions", ["codex-sessions"])
+    elif key == "enter" and selected:
         parts = selected.split("\t")
         if len(parts) >= 4:
             project_path = parts[-2].strip()
