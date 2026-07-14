@@ -15,4 +15,6 @@ require('plugins.ui.diff')
 require('plugins.ui.outline')
 require('plugins.utils.blinkcmp')
 require('plugins.utils.minipick')
-require('plugins.avante.avante')
+if vim.g.avante_enabled == 1 then
+    require('plugins.avante.avante')
+end

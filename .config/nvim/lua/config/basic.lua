@@ -1,6 +1,9 @@
 vim.opt.splitright = true
 vim.opt.termguicolors = true
 
+-- Plugin toggles: 1 = enable, 0 = disable
+vim.g.avante_enabled = 0
+
 if vim.env.WSL_DISTRO_NAME then
     vim.g.loaded_node_provider = 0
     vim.g.loaded_perl_provider = 0

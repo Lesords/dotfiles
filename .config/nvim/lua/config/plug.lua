@@ -60,7 +60,9 @@ vim.cmd [[
         Plug 'MunifTanjim/nui.nvim',
         Plug 'nvim-telescope/telescope.nvim',
 
-        Plug 'yetone/avante.nvim',                          { 'branch': 'main', 'do': 'make' }
+        if get(g:, 'avante_enabled', 0)
+            Plug 'yetone/avante.nvim',                          { 'branch': 'main', 'do': 'make' }
+        endif
     call plug#end()
 
     source ~/.vim/config/lang.vim
