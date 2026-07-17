@@ -26,7 +26,7 @@ from pathlib import Path
 
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 HELP_FLAG = "/tmp/.claude-sessions-help"
-SCOPE_FLAG = "/tmp/.claude-sessions-scope"
+SCOPE_FLAG = "/tmp/.sessions-scope"
 
 # Markdown renderer — glow > bat > plain text
 _MD_RENDERER: tuple | None = None
@@ -658,6 +658,9 @@ def cmd_pick():
         text=True,
     )
 
+    # remember scope state before cleanup — carried across a Ctrl+T switch
+    scope_on = os.path.exists(SCOPE_FLAG)
+
     for flag in (HELP_FLAG, SCOPE_FLAG):
         if os.path.exists(flag):
             os.remove(flag)
@@ -671,6 +674,8 @@ def cmd_pick():
     selected = output[idx + 1:] if idx >= 0 else ""
 
     if key == "ctrl-t":
+        if scope_on:                    # keep current-dir scope in codex-sessions
+            open(SCOPE_FLAG, "w").close()
         os.execvp("codex-sessions", ["codex-sessions"])
     elif key == "enter" and selected:
         parts = selected.split("\t")
