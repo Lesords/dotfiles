@@ -12,11 +12,13 @@ claude-sessions — 交互式浏览/查看 Claude Code session
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import textwrap
 import time
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -27,13 +29,14 @@ HELP_FLAG = "/tmp/.claude-sessions-help"
 SCOPE_FLAG = "/tmp/.claude-sessions-scope"
 
 # Markdown renderer — glow > bat > plain text
-_RENDER: tuple | None = None
-for _cmd, _args in [("glow", ["-", "--style=dark", "--width=72"]),
-                    ("bat", ["-l", "md", "--style=plain", "--color=always",
-                             "--terminal-width=72"])]:
+_MD_RENDERER: tuple | None = None
+for _cmd in ("glow", "bat"):
     if _p := shutil.which(_cmd):
-        _RENDER = (_p, _args)
+        _MD_RENDERER = (_cmd, _p)
         break
+
+# leading ANSI SGR escapes glow prefixes before the text margin
+_LEADING_ANSI = re.compile(r'^(?:\x1b\[[0-9;]*m)*')
 
 # ── ANSI colors ───────────────────────────────────────────────────────────────
 
@@ -148,13 +151,113 @@ def count_messages(entries: list[dict]) -> dict:
     return c
 
 
-def render_markdown(text: str) -> str:
-    if not _RENDER: return text
-    cmd, args = _RENDER
+def render_markdown(text: str, width: int = 72) -> str:
+    if not _MD_RENDERER:
+        return text
+    kind, cmd = _MD_RENDERER
+    if kind == "glow":
+        args = ["-", "--style=dark", f"--width={width}"]
+    else:  # bat
+        args = ["-l", "md", "--style=plain", "--color=always",
+                f"--terminal-width={width}"]
     try:
         r = subprocess.run([cmd, *args], input=text, capture_output=True, text=True, timeout=5)
-        return r.stdout.strip() or text
-    except Exception: return text
+        out = r.stdout
+        if not out.strip():
+            return text
+        lines = out.split("\n")
+        # drop the blank lines glow pads at top/bottom
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        # glow renders every line with a 2-space left margin, but often
+        # prefixes the margin with ANSI styling (headings, wrapped inline-code).
+        # Strip the margin *after* any leading ANSI so text aligns with our
+        # indent; code / table / diagram relative indent is preserved (shifted
+        # left 2). Fixed-2 (not dedent's common-prefix) survives flush lines.
+        def _strip_margin(l):
+            pre = _LEADING_ANSI.match(l).group(0)
+            rest = l[len(pre):].rstrip()
+            if rest.startswith("  "):
+                rest = rest[2:]
+            return pre + rest
+        return "\n".join(_strip_margin(l) for l in lines) or text
+    except Exception:
+        return text
+
+
+# ── width-aware text helpers (CJK-safe) ──────────────────────────────────────
+
+_PREVIEW_INDENT = 7   # spaces prepended to each rendered content line
+_RESULT_LINES = 5     # cap lines shown for a single tool result
+
+
+def _preview_width(default: int = 72) -> int:
+    """Real preview-pane column count, injected by fzf via env."""
+    v = os.environ.get("FZF_PREVIEW_COLUMNS")
+    if v and v.lstrip("-").isdigit() and int(v) > 0:
+        return int(v)
+    return default
+
+
+def _disp_width(s: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
+def _wrap_text(text: str, width: int) -> list[str]:
+    """Wrap to a display width, preserving explicit newlines (CJK-safe)."""
+    width = max(width, 4)
+    out: list[str] = []
+    for para in text.split("\n"):
+        line, w = "", 0
+        for ch in para:
+            cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+            if w + cw > width and line:
+                out.append(line)
+                line, w = ch, cw
+            else:
+                line, w = line + ch, w + cw
+        out.append(line)
+    return out
+
+
+def _truncate(text: str, width: int) -> str:
+    if _disp_width(text) <= width:
+        return text
+    out, w = "", 0
+    for ch in text:
+        cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if w + cw + 1 > width:
+            break
+        out, w = out + ch, w + cw
+    return out + "…"
+
+
+def _tool_input_summary(name: str, inp) -> str:
+    """Pick the most relevant field of a tool_use input for a one-line summary."""
+    if not isinstance(inp, dict):
+        return ""
+    fields = {
+        ("Bash", "BashOutput", "KillShell"): "command",
+        ("Read", "Write", "Edit", "MultiEdit"): "file_path",
+        ("Glob", "Grep"): "pattern",
+        ("Task", "Agent"): "description",
+        ("WebFetch"): "url",
+        ("WebSearch"): "query",
+    }
+    field = next((f for keys, f in fields.items() if name in keys), None)
+    if field:
+        v = inp.get(field)
+        if isinstance(v, str) and v.strip():
+            return " ".join(v.split())
+    if name == "TodoWrite":
+        todos = inp.get("todos") or []
+        return f"{len(todos)} todos" if isinstance(todos, list) else ""
+    for v in inp.values():  # fallback: first non-empty string value
+        if isinstance(v, str) and v.strip():
+            return " ".join(v.split())
+    return ""
 
 
 def session_age(mtime: float) -> str:
@@ -284,7 +387,16 @@ def render_preview(project_short: str, sid: str):
     print(col(f" {sid[:8]}…", GRAY))
     print()
 
+    content_w = max(20, _preview_width() - _PREVIEW_INDENT)
+
+    # Pass 1: render each conversation entry into (role, lines).
+    # The transcript stores each content block (thinking / text / tool_use /
+    # tool_result) as its own entry, so we collapse them per-role in pass 2.
+    # Entries that produce nothing (meta/system/empty results) are dropped.
+    rendered: list[tuple[str, str | None, list[str]]] = []
     for d in entries:
+        if d.get("isSidechain"):
+            continue
         role = d.get("type")
         if role not in ("user", "assistant", "tool"):
             continue
@@ -297,41 +409,63 @@ def render_preview(project_short: str, sid: str):
         elif role == "user":
             has_text = any(
                 isinstance(b, dict) and b.get("type") == "text"
-                and (t := b.get("text", "").strip()) and not t.startswith("<")
+                and (bt := b.get("text", "").strip()) and not bt.startswith("<")
                 for b in content
             )
             role_label = _BADGE_YOU if has_text else _BADGE_TOOL
         else:
             role_label = _BADGE_CLAUDE
 
-        printed = False
+        lines: list[str] = []
+        kind: str | None = None
         for block in (content if isinstance(content, list) else []):
             if not isinstance(block, dict):
                 continue
-            t = block.get("type")
-            lines = None
-            if t == "text":
+            btype = block.get("type")
+            if kind is None:
+                kind = btype
+            if btype == "thinking":
+                lines.append(col("▎thinking…", GRAY))
+            elif btype == "text":
                 text = block.get("text", "").strip()
                 if text and not text.startswith("<"):
-                    lines = render_markdown(text).split("\n")
-            elif t == "tool_use":
-                lines = [col(f'[{block.get("name", "?")}]', GRAY)]
-            elif t == "tool_result":
+                    lines.extend(render_markdown(text, content_w).split("\n"))
+            elif btype == "tool_use":
+                name = block.get("name", "?")
+                summary = _tool_input_summary(name, block.get("input", {}))
+                label = f"[{name}]" + (f"  {summary}" if summary else "")
+                lines.append(col(_truncate(label, content_w), GRAY))
+            elif btype == "tool_result":
                 out = block.get("content", "")
                 if isinstance(out, list):
-                    out = " ".join(x.get("text", "") for x in out if isinstance(x, dict))
-                out = str(out).strip()[:60]
+                    out = "\n".join(
+                        x.get("text", "") for x in out
+                        if isinstance(x, dict) and x.get("type") == "text"
+                    )
+                out = str(out).strip()
                 if out:
-                    lines = [col(out, GRAY)]
-            if not lines:
-                continue
-            if not printed:
-                print(f" {role_label}")
-                printed = True
-            for l in lines:
-                print(f"       {l}")
-        if printed:
-            print()
+                    lines.extend(col(l, GRAY)
+                                 for l in _wrap_text(out, content_w)[:_RESULT_LINES])
+        if lines:
+            rendered.append((role_label, kind, lines))
+
+    # Pass 2: one badge per run of consecutive same-role entries.
+    cur_role = None
+    prev_kind = None
+    for role_label, kind, lines in rendered:
+        if role_label != cur_role:
+            if cur_role is not None:
+                print()
+            print(f" {role_label}")
+            cur_role = role_label
+            prev_kind = None
+        elif prev_kind == "text" and kind == "text":
+            print("       ")   # blank between consecutive body-text entries
+        for l in lines:
+            print(f"       {l}")
+        prev_kind = kind
+    if cur_role is not None:
+        print()
 
     # summary line
     c = count_messages(entries)
