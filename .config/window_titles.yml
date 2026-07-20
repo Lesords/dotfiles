@@ -16,6 +16,9 @@ mappings:
 - class: org.mozilla.firefox
   title: Firefox
   icon: 
+- class: firefox
+  title: Firefox
+  icon: 
 - class: Google-chrome-canary
   title: Chrome
   icon: 
