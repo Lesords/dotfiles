@@ -1,0 +1,34 @@
+#!/bin/bash
+
+theme="$HOME/.config/rofi/powermenu.rasi"
+
+timeout=$(xset q | grep 'timeout:' | awk '{print $2}')
+standby=$(xset q | grep 'Standby:' | awk '{print $2}')
+[[ $standby -gt 0 && $standby -lt $timeout ]] && current=$standby || current=$timeout
+
+current_min=$((current / 60))
+[[ $current -eq 0 ]] && display="从不" || display="${current_min}分钟"
+
+options="1 分钟\n5 分钟\n10 分钟\n15 分钟\n30 分钟\n1 小时\n2 小时\n从不"
+
+chosen=$(printf "$options" | rofi -dmenu -p "锁屏 ($display)" -theme "$theme" -theme-str 'listview {columns: 1; lines: 8;}')
+
+case "$chosen" in
+    "1 分钟")   xset s 60    dpms 60 60 60    ;;
+    "5 分钟")   xset s 300   dpms 300 300 300 ;;
+    "10 分钟")  xset s 600   dpms 600 600 600 ;;
+    "15 分钟")  xset s 900   dpms 900 900 900 ;;
+    "30 分钟")  xset s 1800  dpms 1800 1800 1800 ;;
+    "1 小时")   xset s 3600  dpms 3600 3600 3600 ;;
+    "2 小时")   xset s 7200  dpms 7200 7200 7200 ;;
+    "从不")     xset s 0 -dpms ;;
+esac
+
+[[ -z "$chosen" ]] && notify-send -t 1000 "锁屏时间" "未设置" && exit
+
+new_s=$(xset q | grep 'timeout:' | awk '{print $2}')
+new_d=$(xset q | grep 'Standby:' | awk '{print $2}')
+[[ $new_d -gt 0 && $new_d -lt $new_s ]] && eff=$new_d || eff=$new_s
+[[ $eff -eq 0 ]] && text="从不" || text="${eff}秒"
+
+notify-send -t 2000 "锁屏时间" "已设为 $text"

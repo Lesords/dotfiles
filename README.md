@@ -159,6 +159,7 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + y         | greenclip with rofi     |
 | mod + p         | power menu with rofi    |
 | mod + m         | session action with rofi|
+| mod + t         | lockscreen settings with rofi|
 | mod + shift + s | area screenshot         |
 | Print           | full-screen screenshot  |
 | mod + num         | switch to num workspace |
