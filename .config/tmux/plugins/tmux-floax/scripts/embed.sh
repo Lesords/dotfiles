@@ -11,18 +11,44 @@ if [ -z "$FLOAX_SESSION_NAME" ]; then
     FLOAX_SESSION_NAME="$DEFAULT_SESSION_NAME"
 fi
 
-embed() {
+show_embed_menu() {
+    local windows
+    windows=$(tmux list-windows -t "$ORIGIN_SESSION" -F '#{window_index}:#{window_name}' 2>/dev/null)
+    if [ -z "$windows" ]; then
+        embed_as_new_window
+        return
+    fi
+
+    local menu_args=("-T" "Embed into...")
+    while IFS=':' read -r win_idx win_name; do
+        local label="in $win_idx: $win_name"
+        local cmd="run -b '${CURRENT_DIR}/embed.sh join-into $win_idx'"
+        menu_args+=("$label" "" "$cmd")
+    done <<< "$windows"
+
+    menu_args+=("new window" "n" "run -b '${CURRENT_DIR}/embed.sh new-window'")
+    tmux menu "${menu_args[@]}"
+}
+
+embed_as_new_window() {
     cleanup_bindings_if_inactive || return 0
     require_origin_session || return 0
     unset_bindings
     number_of_windows=$(tmux list-windows -t "$FLOAX_SESSION_NAME" | wc -l)
     if [ "$number_of_windows" -eq 1 ]; then
-        # there's only one window, need to create an alternative
-        # before moving the current one to another session
-        # otherwise the session dies and popping back won't work
         tmux neww -d
     fi
     tmux movew -t "${ORIGIN_SESSION}:"
+    tmux detach-client
+}
+
+embed_into_window() {
+    local target="$1"
+    cleanup_bindings_if_inactive || return 0
+    require_origin_session || return 0
+    unset_bindings
+    tmux neww -d
+    tmux join-pane -t "${ORIGIN_SESSION}:${target}"
     tmux detach-client
 }
 
@@ -44,7 +70,13 @@ pop() {
 action=$1
 case "$action" in
     embed)
-        embed
+        show_embed_menu
+        ;;
+    join-into)
+        embed_into_window "$2"
+        ;;
+    new-window)
+        embed_as_new_window
         ;;
     pop)
         pop
