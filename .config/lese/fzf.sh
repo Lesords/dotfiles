@@ -2,30 +2,35 @@
 
 function rf() {
     rm -f /tmp/rg-fzf-{r,f}
+    local hf=/tmp/rg-fzf-hidden
+    echo false > "$hf"
     RG_PREFIX="rg --column --line-number --no-heading --color=always --smart-case "
     INITIAL_QUERY="${*:-}"
     fzf --ansi --disabled --query "$INITIAL_QUERY" \
         --bind "start:reload:$RG_PREFIX {q}" \
         --bind "change:reload:sleep 0.1; $RG_PREFIX {q} || true" \
-        --bind 'ctrl-t:transform:[[ ! $FZF_PROMPT =~ ripgrep ]] &&
-        echo "rebind(change)+change-prompt(1. ripgrep> )+disable-search+transform-query:echo \{q} > /tmp/rg-fzf-f; cat /tmp/rg-fzf-r" ||
-        echo "unbind(change)+change-prompt(2. fzf> )+enable-search+transform-query:echo \{q} > /tmp/rg-fzf-r; cat /tmp/rg-fzf-f"' \
+        --bind "ctrl-t:transform:
+          if [[ ! \$FZF_PROMPT =~ ripgrep ]]; then
+            if [[ \$(<$hf) = true ]]; then
+              echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(1. ripgrep(hidden)> )+disable-search+transform-query:echo {q} > /tmp/rg-fzf-f; cat /tmp/rg-fzf-r\"
+            else
+              echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(1. ripgrep> )+disable-search+transform-query:echo {q} > /tmp/rg-fzf-f; cat /tmp/rg-fzf-r\"
+            fi
+          else
+            echo \"unbind(change)+change-prompt(2. fzf> )+enable-search+transform-query:echo {q} > /tmp/rg-fzf-r; cat /tmp/rg-fzf-r\"
+          fi" \
+        --bind "ctrl-h:transform:
+          if [[ \$(<$hf) = true ]]; then
+            echo false > '$hf'
+            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(1. ripgrep> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden)\"
+          else
+            echo true > '$hf'
+            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(1. ripgrep(hidden)> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden)\"
+          fi" \
         --color "hl:-1:underline,hl+:-1:underline:reverse" \
         --prompt '1. ripgrep> ' \
         --delimiter : \
-        --header 'CTRL-T: Switch between ripgrep/fzf' \
-        --preview 'bat --color=always {1} --highlight-line {2}' \
-        --preview-window 'up,60%,border-bottom,+{2}+3/3,~3' \
-        --bind 'enter:become(vim {1} +{2})'
-}
-
-function rfa() {
-    RG_PREFIX="rg --column --line-number --no-heading --color=always --smart-case -. "
-    INITIAL_QUERY="${*:-}"
-    fzf --ansi --disabled --query "$INITIAL_QUERY" \
-        --bind "start:reload:$RG_PREFIX {q}" \
-        --bind "change:reload:sleep 0.1; $RG_PREFIX {q} || true" \
-        --delimiter : \
+        --header 'CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden' \
         --preview 'bat --color=always {1} --highlight-line {2}' \
         --preview-window 'up,60%,border-bottom,+{2}+3/3,~3' \
         --bind 'enter:become(vim {1} +{2})'
@@ -87,6 +92,7 @@ if type fzf >/dev/null 2>&1; then
     alias fzf-start="fzf --bind 'enter:become(start {})'"
     if [ -t 1 ]; then
         bind -x '"\C-f": "fzf-vim"'
+        bind -x '"\ef": "rf"'
         bind '"\eh": "\C-ufzf-cd\C-m"'
         if [ "$MSYSTEM" ]; then
             bind -x '"\es": "fzf-start"'
