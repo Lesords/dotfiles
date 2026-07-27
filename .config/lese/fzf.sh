@@ -55,8 +55,21 @@ fzf-vim() {
         --header 'CTRL-T: toggle vim/nvim | Enter: open'
 }
 
-function fd-vim() {
-    fd $1 | fzf --bind 'enter:become(vim {})'
+fd-vim() {
+    local f=/tmp/fzf-vim-mode
+    [[ -f $f ]] || echo vim > "$f"
+    local mode=$(<$f)
+    fd ${@:-.} | fzf \
+        --preview 'bat -n --color=always {}' \
+        --bind "enter:transform:echo \"become(\$(<$f) {})\"" \
+        --bind "ctrl-t:transform:
+            if [[ \$(<$f) = nvim ]]; then
+                echo vim > '$f'; echo 'change-prompt(vim> )'
+            else
+                echo nvim > '$f'; echo 'change-prompt(nvim> )'
+            fi" \
+        --prompt "$mode> " \
+        --header 'CTRL-T: toggle vim/nvim | Enter: open'
 }
 
 ai-session() {
