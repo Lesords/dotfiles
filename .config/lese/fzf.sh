@@ -39,6 +39,22 @@ fzf-cd() {
     cd "$target" 2>/dev/null || echo "无效路径: $target"
 }
 
+fzf-vim() {
+    local f=/tmp/fzf-vim-mode
+    [[ -f $f ]] || echo vim > "$f"
+    local mode=$(<$f)
+    fzf \
+        --bind "enter:transform:echo \"become(\$(<$f) {})\"" \
+        --bind "ctrl-t:transform:
+            if [[ \$(<$f) = nvim ]]; then
+                echo vim > '$f'; echo 'change-prompt(vim> )'
+            else
+                echo nvim > '$f'; echo 'change-prompt(nvim> )'
+            fi" \
+        --prompt "$mode> " \
+        --header 'CTRL-T: toggle vim/nvim | Enter: open'
+}
+
 function fd-vim() {
     fd $1 | fzf --bind 'enter:become(vim {})'
 }
@@ -55,7 +71,6 @@ ai-session() {
 if type fzf >/dev/null 2>&1; then
     eval "$(fzf --bash)"
 
-    alias fzf-vim="fzf --bind 'enter:become(vim {})'"
     alias fzf-start="fzf --bind 'enter:become(start {})'"
     if [ -t 1 ]; then
         bind -x '"\C-f": "fzf-vim"'
