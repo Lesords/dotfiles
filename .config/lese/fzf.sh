@@ -22,16 +22,17 @@ function rf() {
         --bind "ctrl-h:transform:
           if [[ \$(<$hf) = true ]]; then
             echo false > '$hf'
-            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(1. ripgrep> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden)\"
+            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(1. ripgrep> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker)\"
           else
             echo true > '$hf'
-            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(1. ripgrep(hidden)> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden)\"
+            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(1. ripgrep(hidden)> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker)\"
           fi" \
         --color "hl:-1:underline,hl+:-1:underline:reverse" \
         --prompt '1. ripgrep> ' \
         --delimiter : \
-        --header 'CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden' \
-        --preview 'bat --color=always {1} --highlight-line {2}' \
+        --header 'CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker' \
+        --bind "ctrl-f:become(bash -c 'source \$HOME/.config/lese/fzf.sh 2>/dev/null && fzf-vim')" \
+        --preview 'bat --color=always -p {1} --highlight-line {2}' \
         --preview-window 'up,60%,border-bottom,+{2}+3/3,~3' \
         --bind 'enter:become(vim {1} +{2})'
 }
@@ -56,8 +57,10 @@ fzf-vim() {
             else
                 echo nvim > '$f'; echo 'change-prompt(nvim> )'
             fi" \
+        --bind "ctrl-f:become(bash -c 'source \$HOME/.config/lese/fzf.sh 2>/dev/null && rf')" \
         --prompt "$mode> " \
-        --header 'CTRL-T: toggle vim/nvim | Enter: open'
+        --preview-window hidden \
+        --header 'CTRL-T: toggle vim/nvim | Ctrl-f: rg search | Ctrl-/: preview | Enter: open'
 }
 
 fd-vim() {
@@ -92,7 +95,6 @@ if type fzf >/dev/null 2>&1; then
     alias fzf-start="fzf --bind 'enter:become(start {})'"
     if [ -t 1 ]; then
         bind -x '"\C-f": "fzf-vim"'
-        bind -x '"\ef": "rf"'
         bind '"\eh": "\C-ufzf-cd\C-m"'
         if [ "$MSYSTEM" ]; then
             bind -x '"\es": "fzf-start"'
@@ -106,7 +108,7 @@ export FZF_DEFAULT_OPTS='
     --walker-skip .git,node_modules,target
     --height 60% --layout=reverse --border
     --preview "bat -n --color=always --line-range :500 {}"
-    --bind "ctrl-/:change-preview-window(down|hidden|)"'
+    --bind "ctrl-/:change-preview-window(right|down|hidden)"'
 
 export FZF_ALT_C_OPTS="
     --walker-skip .git,node_modules,target
