@@ -16,3 +16,5 @@ if [ "$COUNT" -eq 2 ]; then
         i3-msg "workspace 4; move workspace to output HDMI-A-0"
     fi
 fi
+
+feh --bg-fill $HOME/.config/i3/wallpaper.jpg
