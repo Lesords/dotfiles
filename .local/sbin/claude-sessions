@@ -187,6 +187,56 @@ def render_markdown(text: str, width: int = 72) -> str:
         return text
 
 
+_SENTINEL = "§§BLK§§"          # plain text to glow — survives verbatim for splitting
+_ANSI_ALL = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def render_markdown_batch(texts: list[str], width: int = 72) -> list[str]:
+    """Render many texts in ONE glow subprocess: join with a sentinel glow
+    emits verbatim, render once, split back apart. Falls back to one
+    render_markdown call per text if the split count doesn't match."""
+    if not texts:
+        return []
+    if not _MD_RENDERER:
+        return list(texts)
+    kind, cmd = _MD_RENDERER
+    args = (["-", "--style=dark", f"--width={width}"] if kind == "glow"
+            else ["-l", "md", "--style=plain", "--color=always",
+                  f"--terminal-width={width}"])
+    joined = f"\n\n{_SENTINEL}\n\n".join(texts)
+    try:
+        r = subprocess.run([cmd, *args], input=joined, capture_output=True,
+                           text=True, timeout=15)
+        out = r.stdout
+    except Exception:
+        out = ""
+    segs: list[list[str]] = [[]]
+    for ln in out.split("\n"):
+        if _ANSI_ALL.sub("", ln).strip() == _SENTINEL:
+            segs.append([])
+        else:
+            segs[-1].append(ln)
+    if not out.strip() or len(segs) != len(texts):
+        return [render_markdown(t, width) for t in texts]
+    # strip each segment's padding + 2-space margin (mirrors render_markdown's
+    # _strip_margin — keep in sync).
+    result = []
+    for i, s in enumerate(segs):
+        while s and not s[0].strip():
+            s.pop(0)
+        while s and not s[-1].strip():
+            s.pop()
+        stripped = []
+        for l in s:
+            pre = _LEADING_ANSI.match(l).group(0)
+            rest = l[len(pre):].rstrip()
+            if rest.startswith("  "):
+                rest = rest[2:]
+            stripped.append(pre + rest)
+        result.append("\n".join(stripped) or texts[i])
+    return result
+
+
 # ── width-aware text helpers (CJK-safe) ──────────────────────────────────────
 
 _PREVIEW_INDENT = 7   # spaces prepended to each rendered content line
@@ -394,6 +444,7 @@ def render_preview(project_short: str, sid: str):
     # tool_result) as its own entry, so we collapse them per-role in pass 2.
     # Entries that produce nothing (meta/system/empty results) are dropped.
     rendered: list[tuple[str, str | None, list[str]]] = []
+    pending: list[str] = []   # markdown texts queued for one-shot batch render
     for d in entries:
         if d.get("isSidechain"):
             continue
@@ -429,7 +480,9 @@ def render_preview(project_short: str, sid: str):
             elif btype == "text":
                 text = block.get("text", "").strip()
                 if text and not text.startswith("<"):
-                    lines.extend(render_markdown(text, content_w).split("\n"))
+                    # placeholder — expanded into rendered lines after the loop
+                    lines.append(f"\x00MD\x00{len(pending)}")
+                    pending.append(text)
             elif btype == "tool_use":
                 name = block.get("name", "?")
                 summary = _tool_input_summary(name, block.get("input", {}))
@@ -448,6 +501,23 @@ def render_preview(project_short: str, sid: str):
                                  for l in _wrap_text(out, content_w)[:_RESULT_LINES])
         if lines:
             rendered.append((role_label, kind, lines))
+
+    # Resolve the markdown placeholders in one glow subprocess instead of
+    # one per text block — the difference between ~0.6 s and ~20 s on a
+    # long session. Each placeholder ("\x00MD\x00{idx}") expands to the
+    # rendered lines of pending[idx].
+    if pending:
+        md = render_markdown_batch(pending, content_w)
+        for i, (role_label, kind, ls) in enumerate(rendered):
+            if not any(l.startswith("\x00MD\x00") for l in ls):
+                continue
+            new: list[str] = []
+            for l in ls:
+                if l.startswith("\x00MD\x00"):
+                    new.extend(md[int(l[4:])].split("\n"))
+                else:
+                    new.append(l)
+            rendered[i] = (role_label, kind, new)
 
     # Pass 2: one badge per run of consecutive same-role entries.
     cur_role = None

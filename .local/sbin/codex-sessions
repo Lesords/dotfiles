@@ -57,6 +57,10 @@ def parse_jsonl(path: Path) -> list[dict]:
         return []
 
 
+_SENTINEL = "§§BLK§§"          # plain text to glow — survives verbatim for splitting
+_ANSI_ALL = re.compile(r'\x1b\[[0-9;]*m')
+
+
 def render_markdown(text: str) -> str:
     if not _RENDER: return text
     cmd, args = _RENDER
@@ -64,6 +68,39 @@ def render_markdown(text: str) -> str:
         r = subprocess.run([cmd, *args], input=text, capture_output=True, text=True, timeout=5)
         return r.stdout.strip() or text
     except Exception: return text
+
+
+def render_markdown_batch(texts: list[str]) -> list[str]:
+    """Render many markdown texts in ONE subprocess.
+
+    glow startup (~10 ms/call) dominated the old per-text approach — a
+    400-block session took ~7 s to preview. We join all texts with a
+    sentinel line glow emits verbatim, render once, split back apart.
+    Falls back to per-text rendering if the sentinel count mismatches
+    (defensive; not observed in practice)."""
+    if not texts:
+        return []
+    if not _RENDER:
+        return list(texts)
+    cmd, args = _RENDER
+    joined = f"\n\n{_SENTINEL}\n\n".join(texts)
+    try:
+        r = subprocess.run([cmd, *args], input=joined, capture_output=True,
+                           text=True, timeout=15)
+        out = r.stdout
+    except Exception:
+        out = ""
+    if not out or not out.strip():
+        return [render_markdown(t) for t in texts]
+    segments: list[list[str]] = [[]]
+    for ln in out.split("\n"):
+        if _ANSI_ALL.sub("", ln).strip() == _SENTINEL:
+            segments.append([])
+        else:
+            segments[-1].append(ln)
+    if len(segments) != len(texts):
+        return [render_markdown(t) for t in texts]
+    return ["\n".join(s).strip() or texts[i] for i, s in enumerate(segments)]
 
 
 def session_age(mtime: float) -> str:
@@ -277,6 +314,17 @@ def render_preview(project_short: str, sid: str, display_name: str = ""):
     print(col(f" {'  '.join(parts)}", CYAN))
     print()
 
+    # Pre-render every assistant text in ONE glow subprocess and consume
+    # the results in document order below (one call instead of ~N).
+    _asst_texts: list[str] = []
+    for d in entries:
+        if d.get("type") != "response_item":
+            continue
+        p = d.get("payload", {})
+        if p.get("type") == "message" and p.get("role") == "assistant":
+            _asst_texts.extend(_get_output_texts(p.get("content", [])))
+    _ri = iter(render_markdown_batch(_asst_texts))
+
     for d in entries:
         if d.get("type") != "response_item":
             continue
@@ -300,7 +348,7 @@ def render_preview(project_short: str, sid: str, display_name: str = ""):
                 continue
             print(f" {_BADGE_CODEX}")
             for text in texts:
-                rendered = render_markdown(text)
+                rendered = next(_ri, text)   # pre-rendered in batch above
                 for line in rendered.split("\n"):
                     print(f"       {line}")
             print()
