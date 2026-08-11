@@ -18,6 +18,7 @@ from pathlib import Path
 CODEX_HOME = Path.home() / ".codex"
 HELP_FLAG = "/tmp/.codex-sessions-help"
 SCOPE_FLAG = "/tmp/.sessions-scope"
+_PREVIEW_TURNS = 8    # only render the last N user-initiated turns in preview
 
 _RENDER: tuple | None = None
 for _cmd, _args in [("glow", ["-", "--style=dark", "--width=72"]),
@@ -314,20 +315,28 @@ def render_preview(project_short: str, sid: str, display_name: str = ""):
     print(col(f" {'  '.join(parts)}", CYAN))
     print()
 
+    # Keep preview bounded: render only the last N user-initiated turns.
+    conv = [d for d in entries if d.get("type") == "response_item"]
+    turn_starts = [i for i, d in enumerate(conv)
+                   if d.get("payload", {}).get("type") == "message"
+                   and d.get("payload", {}).get("role") == "user"
+                   and _get_input_texts(d.get("payload", {}).get("content", []))]
+    start = turn_starts[-_PREVIEW_TURNS] if len(turn_starts) >= _PREVIEW_TURNS else 0
+    if start > 0:
+        print(col(f" … last {_PREVIEW_TURNS} of {len(turn_starts)} turns ", GRAY))
+        print()
+    tail = conv[start:]
+
     # Pre-render every assistant text in ONE glow subprocess and consume
     # the results in document order below (one call instead of ~N).
     _asst_texts: list[str] = []
-    for d in entries:
-        if d.get("type") != "response_item":
-            continue
+    for d in tail:
         p = d.get("payload", {})
         if p.get("type") == "message" and p.get("role") == "assistant":
             _asst_texts.extend(_get_output_texts(p.get("content", [])))
     _ri = iter(render_markdown_batch(_asst_texts))
 
-    for d in entries:
-        if d.get("type") != "response_item":
-            continue
+    for d in tail:
         p = d.get("payload", {})
         pt = p.get("type")
         role = p.get("role")

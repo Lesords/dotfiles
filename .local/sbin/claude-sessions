@@ -241,6 +241,7 @@ def render_markdown_batch(texts: list[str], width: int = 72) -> list[str]:
 
 _PREVIEW_INDENT = 7   # spaces prepended to each rendered content line
 _RESULT_LINES = 5     # cap lines shown for a single tool result
+_PREVIEW_TURNS = 8    # only render the last N user-initiated turns in preview
 
 
 def _preview_width(default: int = 72) -> int:
@@ -406,6 +407,19 @@ def _show_help():
     print()
     print(col("  Select a session to preview", GRAY))
 
+
+def _has_real_text(d: dict) -> bool:
+    """Whether a user entry carries real user text (not a system/tool wrapper)."""
+    content = d.get("message", {}).get("content", [])
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    return any(
+        isinstance(b, dict) and b.get("type") == "text"
+        and (t := b.get("text", "").strip()) and not t.startswith("<")
+        for b in (content if isinstance(content, list) else [])
+    )
+
+
 def render_preview(project_short: str, sid: str):
     """Render session content to stdout (for fzf preview pane)."""
     help_on = os.path.exists(HELP_FLAG)
@@ -439,18 +453,24 @@ def render_preview(project_short: str, sid: str):
 
     content_w = max(20, _preview_width() - _PREVIEW_INDENT)
 
+    # Keep preview bounded: render only the last N user-initiated turns
+    # (a turn = a real user message + all assistant/tool entries that follow
+    # it, so each turn's full tool chain stays intact). The message-count
+    # summary below still reflects the whole session.
+    conv = [d for d in entries
+            if not d.get("isSidechain") and d.get("type") in ("user", "assistant", "tool")]
+    turn_starts = [i for i, d in enumerate(conv)
+                   if d.get("type") == "user" and _has_real_text(d)]
+    start = turn_starts[-_PREVIEW_TURNS] if len(turn_starts) >= _PREVIEW_TURNS else 0
+    if start > 0:
+        print(col(f" … last {_PREVIEW_TURNS} of {len(turn_starts)} turns ", GRAY))
+        print()
+
     # Pass 1: render each conversation entry into (role, lines).
-    # The transcript stores each content block (thinking / text / tool_use /
-    # tool_result) as its own entry, so we collapse them per-role in pass 2.
-    # Entries that produce nothing (meta/system/empty results) are dropped.
     rendered: list[tuple[str, str | None, list[str]]] = []
     pending: list[str] = []   # markdown texts queued for one-shot batch render
-    for d in entries:
-        if d.get("isSidechain"):
-            continue
+    for d in conv[start:]:
         role = d.get("type")
-        if role not in ("user", "assistant", "tool"):
-            continue
         content = d.get("message", {}).get("content", [])
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
@@ -458,12 +478,7 @@ def render_preview(project_short: str, sid: str):
         if role == "tool":
             role_label = _BADGE_TOOL
         elif role == "user":
-            has_text = any(
-                isinstance(b, dict) and b.get("type") == "text"
-                and (bt := b.get("text", "").strip()) and not bt.startswith("<")
-                for b in content
-            )
-            role_label = _BADGE_YOU if has_text else _BADGE_TOOL
+            role_label = _BADGE_YOU if _has_real_text(d) else _BADGE_TOOL
         else:
             role_label = _BADGE_CLAUDE
 
