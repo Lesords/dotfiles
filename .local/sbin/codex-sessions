@@ -11,6 +11,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import unicodedata
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -20,13 +21,42 @@ HELP_FLAG = "/tmp/.codex-sessions-help"
 SCOPE_FLAG = "/tmp/.sessions-scope"
 _PREVIEW_TURNS = 8    # only render the last N user-initiated turns in preview
 
-_RENDER: tuple | None = None
-for _cmd, _args in [("glow", ["-", "--style=dark", "--width=72"]),
-                    ("bat", ["-l", "md", "--style=plain", "--color=always",
-                             "--terminal-width=72"])]:
+_MD_RENDERER: tuple | None = None    # (kind, cmd_path)
+for _cmd in ("glow", "bat"):
     if _p := shutil.which(_cmd):
-        _RENDER = (_p, _args)
+        _MD_RENDERER = (_cmd, _p)
         break
+
+
+def _renderer_args(width: int) -> list[str]:
+    if _MD_RENDERER[0] == "glow":
+        return ["-", "--style=dark", f"--width={width}"]
+    return ["-l", "md", "--style=plain", "--color=always", f"--terminal-width={width}"]
+
+
+def _preview_width(default: int = 72) -> int:
+    """Real preview-pane column count, injected by fzf via env."""
+    v = os.environ.get("FZF_PREVIEW_COLUMNS")
+    if v and v.lstrip("-").isdigit() and int(v) > 0:
+        return int(v)
+    return default
+
+
+def _wrap_text(text: str, width: int) -> list[str]:
+    """Wrap to a display width, preserving explicit newlines (CJK-safe)."""
+    width = max(width, 4)
+    out: list[str] = []
+    for para in text.split("\n"):
+        line, w = "", 0
+        for ch in para:
+            cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+            if w + cw > width and line:
+                out.append(line)
+                line, w = ch, cw
+            else:
+                line, w = line + ch, w + cw
+        out.append(line)
+    return out
 
 CYAN    = "\033[38;5;45m"
 MAGENTA = "\033[38;5;201m"
@@ -62,16 +92,16 @@ _SENTINEL = "§§BLK§§"          # plain text to glow — survives verbatim fo
 _ANSI_ALL = re.compile(r'\x1b\[[0-9;]*m')
 
 
-def render_markdown(text: str) -> str:
-    if not _RENDER: return text
-    cmd, args = _RENDER
+def render_markdown(text: str, width: int = 72) -> str:
+    if not _MD_RENDERER: return text
     try:
-        r = subprocess.run([cmd, *args], input=text, capture_output=True, text=True, timeout=5)
+        r = subprocess.run([_MD_RENDERER[1], *_renderer_args(width)],
+                           input=text, capture_output=True, text=True, timeout=5)
         return r.stdout.strip() or text
     except Exception: return text
 
 
-def render_markdown_batch(texts: list[str]) -> list[str]:
+def render_markdown_batch(texts: list[str], width: int = 72) -> list[str]:
     """Render many markdown texts in ONE subprocess.
 
     glow startup (~10 ms/call) dominated the old per-text approach — a
@@ -81,18 +111,18 @@ def render_markdown_batch(texts: list[str]) -> list[str]:
     (defensive; not observed in practice)."""
     if not texts:
         return []
-    if not _RENDER:
+    if not _MD_RENDERER:
         return list(texts)
-    cmd, args = _RENDER
     joined = f"\n\n{_SENTINEL}\n\n".join(texts)
     try:
-        r = subprocess.run([cmd, *args], input=joined, capture_output=True,
+        r = subprocess.run([_MD_RENDERER[1], *_renderer_args(width)],
+                           input=joined, capture_output=True,
                            text=True, timeout=15)
         out = r.stdout
     except Exception:
         out = ""
     if not out or not out.strip():
-        return [render_markdown(t) for t in texts]
+        return [render_markdown(t, width) for t in texts]
     segments: list[list[str]] = [[]]
     for ln in out.split("\n"):
         if _ANSI_ALL.sub("", ln).strip() == _SENTINEL:
@@ -100,7 +130,7 @@ def render_markdown_batch(texts: list[str]) -> list[str]:
         else:
             segments[-1].append(ln)
     if len(segments) != len(texts):
-        return [render_markdown(t) for t in texts]
+        return [render_markdown(t, width) for t in texts]
     return ["\n".join(s).strip() or texts[i] for i, s in enumerate(segments)]
 
 
@@ -327,6 +357,8 @@ def render_preview(project_short: str, sid: str, display_name: str = ""):
         print()
     tail = conv[start:]
 
+    content_w = max(20, _preview_width() - 7)
+
     # Pre-render every assistant text in ONE glow subprocess and consume
     # the results in document order below (one call instead of ~N).
     _asst_texts: list[str] = []
@@ -334,7 +366,7 @@ def render_preview(project_short: str, sid: str, display_name: str = ""):
         p = d.get("payload", {})
         if p.get("type") == "message" and p.get("role") == "assistant":
             _asst_texts.extend(_get_output_texts(p.get("content", [])))
-    _ri = iter(render_markdown_batch(_asst_texts))
+    _ri = iter(render_markdown_batch(_asst_texts, content_w))
 
     for d in tail:
         p = d.get("payload", {})
@@ -347,7 +379,7 @@ def render_preview(project_short: str, sid: str, display_name: str = ""):
                 continue
             print(f" {_BADGE_YOU}")
             for text in texts:
-                for line in _split_text(text):
+                for line in _split_text(text, content_w):
                     print(f"       {line}")
             print()
 
@@ -396,7 +428,7 @@ def _get_output_texts(content):
     return texts
 
 
-def _split_text(text: str) -> list[str]:
+def _split_text(text: str, width: int) -> list[str]:
     first = True
     lines = []
     for line in text.split("\n"):
@@ -407,7 +439,7 @@ def _split_text(text: str) -> list[str]:
             lines.append("")
             continue
         first = False
-        lines.append(line)
+        lines.extend(_wrap_text(line, width))
     return lines
 
 
