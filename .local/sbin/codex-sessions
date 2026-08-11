@@ -588,7 +588,7 @@ def cmd_pick():
         "--color=pointer:#D300C4,marker:#0ABDC6,spinner:#0ABDC6",
         '--prompt=\u276f ', "--pointer=\u25b6",
         f"--preview={sys.executable} {script_path} --preview-line {{2}} {{4}} {{5}}",
-        "--preview-window=right:45%:wrap,nohidden,follow",
+        "--preview-window=right:45%,nohidden,follow",
         f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
         f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({sys.executable} {script_path} --emit-picker)",
         '--header=\x1b[2mCtrl+T: claude-sessions\x1b[0m  \x1b[2mCtrl+A: scope  Ctrl+V: layout\x1b[0m',
@@ -599,7 +599,7 @@ def cmd_pick():
         "--bind=ctrl-f:preview-page-down,ctrl-b:preview-page-up",
         "--bind=g:preview-top,G:preview-bottom",
         "--bind=/:toggle-preview",
-        "--bind=ctrl-v:change-preview-window(right:45%|up:99%)",
+        "--bind=ctrl-v:change-preview-window(right:45%|up:99%)+refresh-preview",
     ]
 
     result = subprocess.run(
