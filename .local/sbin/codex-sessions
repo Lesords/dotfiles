@@ -599,7 +599,8 @@ def cmd_pick():
         "--bind=ctrl-f:preview-page-down,ctrl-b:preview-page-up",
         "--bind=g:preview-top,G:preview-bottom",
         "--bind=/:toggle-preview",
-        "--bind=ctrl-v:change-preview-window(right:45%|up:99%)+refresh-preview",
+        "--bind=ctrl-/:toggle-preview",
+        "--bind=ctrl-v:change-preview-window(up:99%|right:45%)+refresh-preview",
     ]
 
     result = subprocess.run(
