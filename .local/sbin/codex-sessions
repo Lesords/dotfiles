@@ -90,6 +90,7 @@ def parse_jsonl(path: Path) -> list[dict]:
 
 _SENTINEL = "§§BLK§§"          # plain text to glow — survives verbatim for splitting
 _ANSI_ALL = re.compile(r'\x1b\[[0-9;]*m')
+_LEADING_ANSI = re.compile(r'^(?:\x1b\[[0-9;]*m)*')
 
 
 def render_markdown(text: str, width: int = 72) -> str:
@@ -131,7 +132,22 @@ def render_markdown_batch(texts: list[str], width: int = 72) -> list[str]:
             segments[-1].append(ln)
     if len(segments) != len(texts):
         return [render_markdown(t, width) for t in texts]
-    return ["\n".join(s).strip() or texts[i] for i, s in enumerate(segments)]
+    # strip glow's 2-space left margin so text aligns with the indent
+    result = []
+    for i, s in enumerate(segments):
+        while s and not s[0].strip():
+            s.pop(0)
+        while s and not s[-1].strip():
+            s.pop()
+        stripped = []
+        for l in s:
+            pre = _LEADING_ANSI.match(l).group(0)
+            rest = l[len(pre):].rstrip()
+            if rest.startswith("  "):
+                rest = rest[2:]
+            stripped.append(pre + rest)
+        result.append("\n".join(stripped) or texts[i])
+    return result
 
 
 def session_age(mtime: float) -> str:
@@ -401,6 +417,7 @@ def render_preview(project_short: str, sid: str, display_name: str = ""):
                 name = cmd[:40] + "\u2026" if len(cmd) > 40 else cmd
             print(f" {_BADGE_TOOL}")
             print(f"       {col(f'\u21b3 {name}', GRAY)}")
+            print()
 
     c = count_messages(entries)
     total = sum(c.values())
