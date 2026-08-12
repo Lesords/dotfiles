@@ -31,7 +31,7 @@ for _cmd in ("glow", "bat"):
 def _renderer_args(width: int) -> list[str]:
     if _MD_RENDERER[0] == "glow":
         return ["-", "--style=dark", f"--width={width}"]
-    return ["-l", "md", "--style=plain", "--color=always", f"--terminal-width={width}"]
+    return ["--style=plain", "--color=always", f"--terminal-width={width}"]
 
 
 def _preview_width(default: int = 72) -> int:

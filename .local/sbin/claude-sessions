@@ -158,8 +158,7 @@ def render_markdown(text: str, width: int = 72) -> str:
     if kind == "glow":
         args = ["-", "--style=dark", f"--width={width}"]
     else:  # bat
-        args = ["-l", "md", "--style=plain", "--color=always",
-                f"--terminal-width={width}"]
+        args = ["--style=plain", "--color=always", f"--terminal-width={width}"]
     try:
         r = subprocess.run([cmd, *args], input=text, capture_output=True, text=True, timeout=5)
         out = r.stdout
@@ -201,7 +200,7 @@ def render_markdown_batch(texts: list[str], width: int = 72) -> list[str]:
         return list(texts)
     kind, cmd = _MD_RENDERER
     args = (["-", "--style=dark", f"--width={width}"] if kind == "glow"
-            else ["-l", "md", "--style=plain", "--color=always",
+            else ["--style=plain", "--color=always",
                   f"--terminal-width={width}"])
     joined = f"\n\n{_SENTINEL}\n\n".join(texts)
     try:
