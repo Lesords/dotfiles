@@ -268,7 +268,7 @@ def emit_picker_lines():
     if not sessions:
         return
 
-    scope_on = os.path.exists(SCOPE_FLAG)
+    scope_on = not os.path.exists(SCOPE_FLAG)
     cwd = Path.cwd()
 
     if scope_on:
@@ -628,7 +628,7 @@ def cmd_pick():
     )
 
     # remember scope state before cleanup — carried across a Ctrl+T switch
-    scope_on = os.path.exists(SCOPE_FLAG)
+    scope_on = not os.path.exists(SCOPE_FLAG)
 
     for flag in (HELP_FLAG, SCOPE_FLAG):
         if os.path.exists(flag):
@@ -643,7 +643,7 @@ def cmd_pick():
     selected = output[idx + 1:] if idx >= 0 else ""
 
     if key == "ctrl-t":
-        if scope_on:                    # keep current-dir scope in claude-sessions
+        if not scope_on:                # carry "all" mode to claude-sessions
             open(SCOPE_FLAG, "w").close()
         os.execvp("claude-sessions", ["claude-sessions"])
     elif key == "enter" and selected:

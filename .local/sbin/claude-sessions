@@ -363,7 +363,7 @@ def collect_sessions():
 def emit_picker_lines():
     """Print tab-delimited lines for fzf:  <display>\t<proj_short>\t<proj_path>\t<sid>"""
     sessions = collect_sessions()
-    scope_on = os.path.exists(SCOPE_FLAG)
+    scope_on = not os.path.exists(SCOPE_FLAG)
     cwd = Path.cwd()
 
     # Filter by current directory when scope mode is on
@@ -744,7 +744,7 @@ def cmd_pick():
     )
 
     # remember scope state before cleanup — carried across a Ctrl+T switch
-    scope_on = os.path.exists(SCOPE_FLAG)
+    scope_on = not os.path.exists(SCOPE_FLAG)
 
     for flag in (HELP_FLAG, SCOPE_FLAG):
         if os.path.exists(flag):
@@ -759,7 +759,7 @@ def cmd_pick():
     selected = output[idx + 1:] if idx >= 0 else ""
 
     if key == "ctrl-t":
-        if scope_on:                    # keep current-dir scope in codex-sessions
+        if not scope_on:                # carry "all" mode to codex-sessions
             open(SCOPE_FLAG, "w").close()
         os.execvp("codex-sessions", ["codex-sessions"])
     elif key == "enter" and selected:
