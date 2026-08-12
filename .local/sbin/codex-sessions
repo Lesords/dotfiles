@@ -287,7 +287,7 @@ def emit_picker_lines():
             disp = " ".join(s["display"].split())
             label = (disp[:58] + "\u2026") if len(disp) > 58 else disp
             age_s = col(f"[{s['age']:>3}]", MAGENTA)
-            print(f"    {age_s}  {col(label, WHITE)}\t{s['project_short']}\t{s['cwd']}\t{s['sid']}\t{disp}")
+            print(f"    {age_s}  {col(label, WHITE)}  {col(os.path.basename(s['project_short']), GRAY)}\t{s['project_short']}\t{s['cwd']}\t{s['sid']}\t{disp}")
 
 
 def _show_help():
@@ -594,7 +594,7 @@ def cmd_pick():
         return
 
     fzf_cmd = [
-        "fzf", "--ansi",
+        "fzf", "--ansi", "--exact",
         "--height=100%",
         "--delimiter=\t",
         "--with-nth=1", "--nth=1",

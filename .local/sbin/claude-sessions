@@ -386,7 +386,7 @@ def emit_picker_lines():
             label = (d[:58] + "…") if len(d) > 58 else d
             age_s = col(f"[{s['age']:>3}]", MAGENTA)
             proj_path = str(s["project"])
-            print(f"    {age_s}  {col(label, WHITE)}\t{s['project_short']}\t{proj_path}\t{s['sid']}")
+            print(f"    {age_s}  {col(label, WHITE)}  {col(os.path.basename(s['project_short']), GRAY)}\t{s['project_short']}\t{proj_path}\t{s['sid']}")
 
 
 # ── preview (called by fzf --preview) ────────────────────────────────────────
@@ -710,7 +710,7 @@ def cmd_pick():
         return
 
     fzf_cmd = [
-        "fzf", "--ansi",
+        "fzf", "--ansi", "--exact",
         "--height=100%",
         "--delimiter=\t",
         "--with-nth=1", "--nth=1",
