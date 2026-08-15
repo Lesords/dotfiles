@@ -109,7 +109,9 @@ export FZF_DEFAULT_OPTS='
     --walker-skip .git,node_modules,target
     --height 60% --layout=reverse --border
     --preview "bat -n --color=always --line-range :500 {}"
-    --bind "ctrl-/:change-preview-window(right|down|hidden)"'
+    --bind "ctrl-/:change-preview-window(right|down|hidden)"
+    --bind "ctrl-e:preview-half-page-down"
+    --bind "ctrl-y:preview-half-page-up"'
 
 export FZF_ALT_C_OPTS="
     --walker-skip .git,node_modules,target
