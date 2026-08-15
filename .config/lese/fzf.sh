@@ -10,25 +10,25 @@ function rf() {
         --bind "start:reload:$RG_PREFIX {q}" \
         --bind "change:reload:sleep 0.1; $RG_PREFIX {q} || true" \
         --bind "ctrl-t:transform:
-          if [[ ! \$FZF_PROMPT =~ ripgrep ]]; then
+          if [[ ! \$FZF_PROMPT =~ 'rg:' ]]; then
             if [[ \$(<$hf) = true ]]; then
-              echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(1. ripgrep(hidden)> )+disable-search+transform-query:echo {q} > /tmp/rg-fzf-f; cat /tmp/rg-fzf-r\"
+              echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(rg:text(hidden)> )+disable-search+transform-query:echo {q} > /tmp/rg-fzf-f; cat /tmp/rg-fzf-r\"
             else
-              echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(1. ripgrep> )+disable-search+transform-query:echo {q} > /tmp/rg-fzf-f; cat /tmp/rg-fzf-r\"
+              echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(rg:text> )+disable-search+transform-query:echo {q} > /tmp/rg-fzf-f; cat /tmp/rg-fzf-r\"
             fi
           else
-            echo \"unbind(change)+change-prompt(2. fzf> )+enable-search+transform-query:echo {q} > /tmp/rg-fzf-r; cat /tmp/rg-fzf-r\"
+            echo \"unbind(change)+change-prompt(fzf:filter> )+enable-search+transform-query:echo {q} > /tmp/rg-fzf-r; cat /tmp/rg-fzf-r\"
           fi" \
         --bind "ctrl-h:transform:
           if [[ \$(<$hf) = true ]]; then
             echo false > '$hf'
-            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(1. ripgrep> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker)\"
+            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case  {q} || true)+change-prompt(rg:text> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker)\"
           else
             echo true > '$hf'
-            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(1. ripgrep(hidden)> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker)\"
+            echo \"rebind(change)+reload(sleep 0.1; rg --column --line-number --no-heading --color=always --smart-case -. {q} || true)+change-prompt(rg:text(hidden)> )+change-header(CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker)\"
           fi" \
         --color "hl:-1:underline,hl+:-1:underline:reverse" \
-        --prompt '1. ripgrep> ' \
+        --prompt 'rg:text> ' \
         --delimiter : \
         --header 'CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker' \
         --bind "ctrl-f:become(bash -c 'source \$HOME/.config/lese/fzf.sh 2>/dev/null && fzf-vim')" \
@@ -54,12 +54,12 @@ fzf-vim() {
         --bind "enter:transform:echo \"become(\$(<$f) {})\"" \
         --bind "ctrl-t:transform:
             if [[ \$(<$f) = nvim ]]; then
-                echo vim > '$f'; echo 'change-prompt(vim> )'
+                echo vim > '$f'; echo 'change-prompt(vim:file> )'
             else
-                echo nvim > '$f'; echo 'change-prompt(nvim> )'
+                echo nvim > '$f'; echo 'change-prompt(nvim:file> )'
             fi" \
         --bind "ctrl-f:become(bash -c 'source \$HOME/.config/lese/fzf.sh 2>/dev/null && rf')" \
-        --prompt "$mode> " \
+        --prompt "${mode}:file> " \
         --preview-window hidden \
         --header 'CTRL-T: toggle vim/nvim | Ctrl-f: rg search | Ctrl-/: preview | Enter: open'
 }
@@ -73,11 +73,11 @@ fd-vim() {
         --bind "enter:transform:echo \"become(\$(<$f) {})\"" \
         --bind "ctrl-t:transform:
             if [[ \$(<$f) = nvim ]]; then
-                echo vim > '$f'; echo 'change-prompt(vim> )'
+                echo vim > '$f'; echo 'change-prompt(vim:file> )'
             else
-                echo nvim > '$f'; echo 'change-prompt(nvim> )'
+                echo nvim > '$f'; echo 'change-prompt(nvim:file> )'
             fi" \
-        --prompt "$mode> " \
+        --prompt "${mode}:file> " \
         --header 'CTRL-T: toggle vim/nvim | Enter: open'
 }
 
