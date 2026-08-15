@@ -33,9 +33,9 @@ function rf() {
         --delimiter : \
         --header 'CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker' \
         --bind "ctrl-f:become(bash -c 'source \$HOME/.config/lese/fzf.sh 2>/dev/null && fzf-vim')" \
-        --bind "ctrl-/:change-preview-window(down,60%,border,+{2}+3/3|right,50%,border,+{2}+3/3|hidden)" \
+        --bind "ctrl-/:change-preview-window(down,60%,border,+{2}/3|right,50%,border,+{2}/3|hidden)" \
         --preview 'bat --color=always -p {1} --highlight-line {2}' \
-        --preview-window 'down,60%,border,+{2}+3/3,~3' \
+        --preview-window 'down,60%,border,+{2}/3' \
         --bind 'enter:become(vim {1} +{2})'
 }
 
