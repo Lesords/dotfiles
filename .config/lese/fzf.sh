@@ -7,6 +7,7 @@ function rf() {
     RG_PREFIX="rg --column --line-number --no-heading --color=always --smart-case "
     INITIAL_QUERY="${*:-}"
     fzf --ansi --disabled --query "$INITIAL_QUERY" \
+        --height 85% \
         --bind "start:reload:$RG_PREFIX {q}" \
         --bind "change:reload:sleep 0.1; $RG_PREFIX {q} || true" \
         --bind "ctrl-t:transform:
@@ -32,9 +33,9 @@ function rf() {
         --delimiter : \
         --header 'CTRL-T: switch ripgrep/fzf | CTRL-H: toggle hidden | Ctrl-f: file picker' \
         --bind "ctrl-f:become(bash -c 'source \$HOME/.config/lese/fzf.sh 2>/dev/null && fzf-vim')" \
-        --bind "ctrl-/:change-preview-window(right,50%,border,+{2}+3/3|down,60%,border,+{2}+3/3|hidden)" \
+        --bind "ctrl-/:change-preview-window(down,60%,border,+{2}+3/3|right,50%,border,+{2}+3/3|hidden)" \
         --preview 'bat --color=always -p {1} --highlight-line {2}' \
-        --preview-window 'up,60%,border,+{2}+3/3,~3' \
+        --preview-window 'down,60%,border,+{2}+3/3,~3' \
         --bind 'enter:become(vim {1} +{2})'
 }
 
@@ -51,6 +52,7 @@ fzf-vim() {
     [[ -f $f ]] || echo vim > "$f"
     local mode=$(<$f)
     fzf \
+        --height 70% \
         --bind "enter:transform:echo \"become(\$(<$f) {})\"" \
         --bind "ctrl-t:transform:
             if [[ \$(<$f) = nvim ]]; then
