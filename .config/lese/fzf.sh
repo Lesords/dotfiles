@@ -44,6 +44,7 @@ fzf-cd() {
     [ ! -f "$file" ] && echo "路径文件不存在" && return 1
 
     local target=$(fzf --height 40% --preview 'ls -lAh {}' --preview-window hidden:wrap --bind 'ctrl-/:toggle-preview' < "$file")
+    [ -z "$target" ] && echo "已取消" && return 0
     cd "$target" 2>/dev/null || echo "无效路径: $target"
 }
 
