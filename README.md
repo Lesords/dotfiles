@@ -165,6 +165,7 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | mod + num         | switch to num workspace |
 | mod + shift + num | move to num workspace   |
 | mod + tab         | switch workspace        |
+| mod + shift + tab | switch to next workspace(current monitor) |
 | mod + ctrl + left  | switch to previous workspace |
 | mod + ctrl + right | switch to next workspace     |
 | mod + ctrl + n     | create a new workspace           |
