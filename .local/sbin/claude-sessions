@@ -144,6 +144,12 @@ def first_message(entries: list[dict]) -> str:
     return ""
 
 
+def msg_uuids(entries: list[dict]) -> set:
+    """Uuids of all user/assistant entries — overlap reveals fork vs compact."""
+    return {d["uuid"] for d in entries
+            if d.get("type") in ("user", "assistant") and d.get("uuid")}
+
+
 def count_messages(entries: list[dict]) -> dict:
     c = {"user": 0, "assistant": 0, "tool": 0, "other": 0}
     for d in entries:
@@ -347,6 +353,7 @@ def collect_sessions():
             mtime = f.stat().st_mtime
             sessions.append({
                 "sid": f.stem, "project": real or Path(),
+                "uuids": msg_uuids(entries),
                 "project_short": short, "first_msg": msg,
                 "display": display,
                 "mtime": mtime, "age": session_age(mtime),
@@ -359,6 +366,15 @@ def collect_sessions():
 
 
 # ── picker output (for fzf) ──────────────────────────────────────────────────
+
+def _print_session_row(prefix: str, s: dict, kind: str | None = None):
+    d = s.get("display", s["first_msg"])
+    label = (d[:58] + "…") if len(d) > 58 else d
+    age_s = col(f"[{s['age']:>3}]", MAGENTA)
+    tag = f" {col(f'({kind})', GRAY)}" if kind else ""
+    print(f"{prefix}{age_s}  {col(label, WHITE)}{tag}  "
+          f"{col(os.path.basename(s['project_short']), GRAY)}\t{s['project_short']}\t{str(s['project'])}\t{s['sid']}")
+
 
 def emit_picker_lines():
     """Print tab-delimited lines for fzf:  <display>\t<proj_short>\t<proj_path>\t<sid>"""
@@ -381,12 +397,27 @@ def emit_picker_lines():
     for proj, convs in groups.items():
         count = len(convs)
         print(f"  {col(proj, CYAN)}  {col(f'({count})', GRAY)}")
+        # same-named segments (compact forks) nest under the newest one
+        tops: list[tuple[dict, list[dict]]] = []
+        idx_of: dict[str, int] = {}
         for s in convs:
-            d = s.get("display", s["first_msg"])
-            label = (d[:58] + "…") if len(d) > 58 else d
-            age_s = col(f"[{s['age']:>3}]", MAGENTA)
-            proj_path = str(s["project"])
-            print(f"    {age_s}  {col(label, WHITE)}  {col(os.path.basename(s['project_short']), GRAY)}\t{s['project_short']}\t{proj_path}\t{s['sid']}")
+            key = s.get("display", s["first_msg"])
+            if key in idx_of:
+                tops[idx_of[key]][1].append(s)
+            else:
+                idx_of[key] = len(tops)
+                tops.append((s, []))
+        for i, (s, dups) in enumerate(tops):
+            last = i == len(tops) - 1
+            _print_session_row("  └─ " if last else "  ├─ ", s)
+            stem = "    " if last else "│   "
+            for j, d in enumerate(dups):
+                sub = "└─ " if j == len(dups) - 1 else "├─ "
+                # fork: real message overlap with the newest segment
+                # (full or mid-point copy); compact: summary restart, ~none
+                du, tu = d.get("uuids", set()), s.get("uuids", set())
+                kind = "fork" if len(du & tu) > 0.1 * max(len(du), 1) else "compact"
+                _print_session_row(f"  {stem}{sub}", d, kind)
 
 
 # ── preview (called by fzf --preview) ────────────────────────────────────────
