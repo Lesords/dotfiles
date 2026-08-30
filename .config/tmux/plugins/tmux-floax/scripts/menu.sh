@@ -3,22 +3,27 @@
 CURRENT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "$CURRENT_DIR/utils.sh"
 
-# Function to check if the current session name matches "scratch"
 check_current_session() {
-    if [ -z "$FLOAX_SESSION_NAME" ]; then
-        FLOAX_SESSION_NAME="$DEFAULT_SESSION_NAME"
-    fi
     current_session=$(tmux display-message -p '#{session_name}')
-    if [ "$current_session" != "$FLOAX_SESSION_NAME" ]; then
-        if tmux has-session -t "$FLOAX_SESSION_NAME" 2>/dev/null; then
+    if echo "$current_session" | grep -q "^floax-"; then
+        return 0
+    fi
+    local expected="floax-${current_session}"
+    if tmux has-session -t "$expected" 2>/dev/null; then
+        local attached
+        attached=$(tmux display -p -t "$expected" '#{session_attached}' 2>/dev/null)
+        if [ -n "$attached" ] && [ "$attached" -gt 0 ] 2>/dev/null; then
             tmux menu \
                 "pop current window" p "run \"$CURRENT_DIR/embed.sh pop\""
         else
             tmux display-message -d 3000 \
                 "FloaX: open floax first with Ctrl+Alt+o"
         fi
-        exit 0
+    else
+        tmux display-message -d 3000 \
+            "FloaX: open floax first with Ctrl+Alt+o"
     fi
+    exit 0
 }
 
 check_current_session
