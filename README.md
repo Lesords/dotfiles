@@ -210,11 +210,13 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Resize | h/j/k/l | Resize pane by 5 (left/down/up/right) |
 | Resize | H/J/K/L | Resize pane by 20 (left/down/up/right) |
 | Resize | z       | Zoom pane toggle |
-| Resize | q       | Exit resize mode |
+| Resize | Tab     | Switch to layout mode |
 | Layout | Space   | Switch to main-vertical layout + first pane 70% |
 | Layout | t       | Switch to tiled layout |
 | Layout | n       | Next layout |
 | Layout | p       | Previous layout |
+| Layout | Tab     | Switch to resize mode |
+| Resize/Layout | q | Exit current mode |
 | Copy   | o             | Open a highlighted selection with the system default program                           |
 | Copy   | Ctrl + o      | Open a highlighted selection with the $EDITOR                                          |
 | Copy   | Shift + s     | Search the highlighted selection directly inside a search engine (defaults to google)  |
