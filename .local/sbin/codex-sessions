@@ -80,24 +80,29 @@ def col(s, c):
     return f"{c}{s}{RESET}"
 
 
-def parse_jsonl(path: Path) -> list[dict]:
-    """Parse a session file, tolerating crash-torn lines: a session killed
-    mid-write leaves a truncated/NUL-padded tail — skip bad lines instead of
-    discarding the whole file, so one torn tail cannot hide the session."""
+def parse_lines(chunk: str) -> list[dict]:
+    """Parse jsonl text line-by-line, tolerating crash-torn lines: a session
+    killed mid-write leaves a truncated/NUL-padded tail — skip bad lines
+    instead of discarding the whole file, so one torn tail cannot hide the
+    session."""
     out = []
+    for l in chunk.split("\n"):
+        l = l.strip()
+        if not l:
+            continue
+        try:
+            out.append(json.loads(l))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def parse_jsonl(path: Path) -> list[dict]:
     try:
         with open(path, errors="replace") as f:
-            for l in f:
-                l = l.strip()
-                if not l:
-                    continue
-                try:
-                    out.append(json.loads(l))
-                except json.JSONDecodeError:
-                    continue
+            return parse_lines(f.read())
     except OSError:
         return []
-    return out
 
 
 _SENTINEL = "§§BLK§§"          # plain text to glow — survives verbatim for splitting
@@ -223,6 +228,19 @@ def _get_cwd(entries: list[dict]) -> str:
     return ""
 
 
+_CWD_WINDOW = 65536   # session_meta is the first line of a rollout file
+
+
+def _cwd_of(f: Path) -> str:
+    """cwd from the session_meta head line alone — full-parsing every file
+    just for this costs ~0.16s today and grows with total history."""
+    try:
+        with open(f, errors="replace") as fh:
+            return _get_cwd(parse_lines(fh.read(_CWD_WINDOW)))
+    except OSError:
+        return ""
+
+
 def count_messages(entries: list[dict]) -> dict:
     c = {"user": 0, "assistant": 0, "tool": 0}
     for d in entries:
@@ -258,8 +276,7 @@ def collect_sessions():
 
                     display = titles.get(sid) or prompts.get(sid) or sid[:8]
                     mtime = f.stat().st_mtime
-                    entries = parse_jsonl(f)
-                    cwd = _get_cwd(entries)
+                    cwd = _cwd_of(f)
                     short = str(cwd).replace(str(Path.home()), "~") if cwd else "?"
 
                     sessions.append({
