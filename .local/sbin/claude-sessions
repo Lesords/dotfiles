@@ -91,24 +91,29 @@ def decode_project_dir(encoded: str) -> Path | None:
 
 # ── jsonl parsing ─────────────────────────────────────────────────────────────
 
-def parse_jsonl(path: Path) -> list[dict]:
-    """Parse a session file, tolerating crash-torn lines: a session killed
-    mid-write leaves a truncated/NUL-padded tail — skip bad lines instead of
-    discarding the whole file (Claude's own resume picker reads them fine)."""
+def parse_lines(chunk: str) -> list[dict]:
+    """Parse jsonl text line-by-line, tolerating crash-torn lines: a session
+    killed mid-write leaves a truncated/NUL-padded tail — skip bad lines
+    instead of discarding the whole file (Claude's own resume picker reads
+    them fine)."""
     out = []
+    for l in chunk.split("\n"):
+        l = l.strip()
+        if not l:
+            continue
+        try:
+            out.append(json.loads(l))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def parse_jsonl(path: Path) -> list[dict]:
     try:
         with open(path, errors="replace") as f:
-            for l in f:
-                l = l.strip()
-                if not l:
-                    continue
-                try:
-                    out.append(json.loads(l))
-                except json.JSONDecodeError:
-                    continue
+            return parse_lines(f.read())
     except OSError:
         return []
-    return out
 
 
 def _latest_title(entries: list[dict], entry_type: str, field: str) -> str:
@@ -340,10 +345,109 @@ def format_time(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
 
 
-def collect_sessions():
+# ── summary cache + window scan (fast list path) ──────────────────────────────
+# Full json.loads of every session costs ~1.5 s (114 MB, all CPU) and grows
+# with total history. The picker needs far less:
+#   display   ← head/tail 64KB window: first message lives at the head, the
+#               latest title near the tail (verified identical to full parse)
+#   uuids     ← only same-display groups use them (fork/compact tags)
+#   counts    ← only list/info show them
+# uuids/counts come from a cache keyed by (mtime, size) — exact for that file
+# state — and are rebuilt by full-parsing just the files that need them.
+
+CACHE_VERSION = 1
+_WINDOW = 65536        # head/tail scan window per file
+_HEAD_MAX = 1 << 20    # rare: first message beyond the window — extend head
+
+
+def _cache_path() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(base) / "claude-sessions" / "index.json"
+
+
+def _cache_load() -> dict:
+    try:
+        with open(_cache_path()) as f:
+            c = json.load(f)
+        return c if c.get("version") == CACHE_VERSION else {}
+    except Exception:
+        return {}   # missing/corrupt → cold rebuild
+
+
+def _cache_save(cache: dict):
+    try:
+        p = _cache_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(cache, f, separators=(",", ":"))
+        os.replace(tmp, p)   # atomic; concurrent pickers last-write-wins
+    except OSError:
+        pass   # cache is best-effort — never block the picker
+
+
+def _display_scan(f: Path, sz: int) -> tuple[str, str]:
+    """(display, first_msg) from the head/tail window only — no full parse."""
+    with open(f, errors="replace") as fh:
+        head = parse_lines(fh.read(_WINDOW))
+        tail = []
+        if sz > 2 * _WINDOW:
+            fh.seek(max(0, sz - _WINDOW))
+            tail = parse_lines(fh.read())
+    win = head + tail   # file order: titles' latest is the true latest
+    # Title priority matches Claude's resume picker:
+    #   custom-title (user-set) > ai-title (AI-gen)
+    #   > last-prompt (Claude's no-title fallback) > first message
+    display = (get_custom_title(win) or get_ai_title(win)
+               or get_last_prompt(win))
+    msg = first_message(head)
+    if not display and not msg and sz > _WINDOW:
+        with open(f, errors="replace") as fh:   # first message deep in file
+            msg = first_message(parse_lines(fh.read(_HEAD_MAX)))
+    return display or msg, msg
+
+
+def _lazy_fill(sessions: list[dict], files: dict, need_counts: bool) -> bool:
+    """Full-parse (and cache) only sessions whose data is actually used:
+    same-display group members (fork/compact uuid overlap) or, when a caller
+    shows counts, everything without them. Returns True if cache changed."""
+    groups: dict[tuple, int] = {}
+    for s in sessions:
+        k = (s["project_short"], s["display"])
+        groups[k] = groups.get(k, 0) + 1
+    dirty = False
+    for s in sessions:
+        grouped = groups[(s["project_short"], s["display"])] > 1
+        if s["uuids"] is None:
+            s["uuids"] = set()
+        needs_parse = s["counts"] is None and (grouped or need_counts)
+        if s["counts"] is None:
+            s["counts"], s["total_msgs"] = {}, 0
+        if not needs_parse:
+            continue
+        entries = parse_jsonl(s["path"])
+        if grouped:
+            s["uuids"] = msg_uuids(entries)
+        s["counts"] = count_messages(entries)
+        s["total_msgs"] = sum(s["counts"].values())
+        files[str(s["path"])] = {
+            "mtime": s["mtime"], "size": s["path"].stat().st_size,
+            "uuids": sorted(s["uuids"]), "counts": s["counts"],
+        }
+        dirty = True
+    return dirty
+
+
+def collect_sessions(need_counts: bool = False):
+    """need_counts=True forces full-parse for msg counts (list/info); the
+    picker doesn't show counts and stays on the fast window path."""
     if not CLAUDE_PROJECTS.exists():
         return []
+    cache = _cache_load()
+    cache["version"] = CACHE_VERSION   # _cache_load rejects other versions
+    files = cache.setdefault("files", {})
     sessions = []
+
     for p in sorted(CLAUDE_PROJECTS.iterdir()):
         if not p.is_dir():
             continue
@@ -353,27 +457,33 @@ def collect_sessions():
                         key=lambda x: x.stat().st_mtime, reverse=True):
             if f.stem.startswith("agent-"):
                 continue
-            entries = parse_jsonl(f)
-            msg = first_message(entries)
-            # Title priority matches Claude's resume picker:
-            #   custom-title (user-set) > ai-title (AI-gen)
-            #   > last-prompt (Claude's no-title fallback) > first message
-            display = (get_custom_title(entries) or get_ai_title(entries)
-                       or get_last_prompt(entries) or msg)
+            st = f.stat()
+            hit = files.get(str(f))
+            if hit and hit["mtime"] == st.st_mtime and hit["size"] == st.st_size:
+                uuids, counts = set(hit["uuids"]), hit["counts"]
+            else:
+                uuids, counts = None, None   # pending lazy full parse
+            display, msg = _display_scan(f, st.st_size)
             if not display:
                 continue
-            mtime = f.stat().st_mtime
             sessions.append({
                 "sid": f.stem, "project": real or Path(),
-                "uuids": msg_uuids(entries),
+                "uuids": uuids,
                 "project_short": short, "first_msg": msg,
                 "display": display,
-                "mtime": mtime, "age": session_age(mtime),
-                "time": format_time(mtime),
-                "counts": count_messages(entries),
-                "total_msgs": sum(count_messages(entries).values()),
+                "mtime": st.st_mtime, "age": session_age(st.st_mtime),
+                "time": format_time(st.st_mtime),
+                "counts": counts, "total_msgs": sum(counts.values()) if counts else 0,
                 "path": f,
             })
+
+    dirty = _lazy_fill(sessions, files, need_counts)
+    seen = {str(s["path"]) for s in sessions}
+    stale = [k for k in files if k not in seen]   # sessions deleted upstream
+    for k in stale:
+        del files[k]
+    if dirty or stale:
+        _cache_save(cache)
     return sessions
 
 
@@ -604,7 +714,7 @@ def render_preview(project_short: str, sid: str):
 # ── commands ──────────────────────────────────────────────────────────────────
 
 def cmd_list():
-    sessions = collect_sessions()
+    sessions = collect_sessions(need_counts=True)
     if not sessions:
         print("No sessions found.")
         return
@@ -623,7 +733,7 @@ def cmd_list():
 
 
 def cmd_info(sid: str):
-    sessions = collect_sessions()
+    sessions = collect_sessions(need_counts=True)
     match = [s for s in sessions if s["sid"] == sid]
     if not match:
         print(f"Session {sid} not found.")
