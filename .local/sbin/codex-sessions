@@ -81,11 +81,23 @@ def col(s, c):
 
 
 def parse_jsonl(path: Path) -> list[dict]:
+    """Parse a session file, tolerating crash-torn lines: a session killed
+    mid-write leaves a truncated/NUL-padded tail — skip bad lines instead of
+    discarding the whole file, so one torn tail cannot hide the session."""
+    out = []
     try:
-        with open(path) as f:
-            return [json.loads(l) for l in f if l.strip()]
-    except Exception:
+        with open(path, errors="replace") as f:
+            for l in f:
+                l = l.strip()
+                if not l:
+                    continue
+                try:
+                    out.append(json.loads(l))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
         return []
+    return out
 
 
 _SENTINEL = "§§BLK§§"          # plain text to glow — survives verbatim for splitting
