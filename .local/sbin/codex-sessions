@@ -219,26 +219,20 @@ def _extract_sid(filename: str) -> str | None:
     return m.group(0) if m else None
 
 
-def _get_cwd(entries: list[dict]) -> str:
-    for d in entries:
-        if d.get("type") == "session_meta":
-            cwd = d.get("payload", {}).get("cwd", "")
-            if cwd:
-                return cwd
-    return ""
-
-
 _CWD_WINDOW = 65536   # session_meta is the first line of a rollout file
 
 
-def _cwd_of(f: Path) -> str:
-    """cwd from the session_meta head line alone — full-parsing every file
-    just for this costs ~0.16s today and grows with total history."""
+def _meta_head(f: Path) -> dict:
+    """session_meta from the head of the file alone — full-parsing every
+    file just for this costs ~0.16s today and grows with total history."""
     try:
         with open(f, errors="replace") as fh:
-            return _get_cwd(parse_lines(fh.read(_CWD_WINDOW)))
+            for d in parse_lines(fh.read(_CWD_WINDOW)):
+                if d.get("type") == "session_meta":
+                    return d.get("payload", {})
     except OSError:
-        return ""
+        pass
+    return {}
 
 
 def count_messages(entries: list[dict]) -> dict:
@@ -274,9 +268,13 @@ def collect_sessions():
                     if not sid:
                         continue
 
-                    display = titles.get(sid) or prompts.get(sid) or sid[:8]
+                    meta = _meta_head(f)
+                    if meta.get("thread_source") == "subagent":
+                        continue
+
+                    display = titles.get(sid) or prompts.get(sid) or sid[:12]
                     mtime = f.stat().st_mtime
-                    cwd = _cwd_of(f)
+                    cwd = meta.get("cwd", "")
                     short = str(cwd).replace(str(Path.home()), "~") if cwd else "?"
 
                     sessions.append({
