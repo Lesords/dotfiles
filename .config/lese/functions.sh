@@ -70,6 +70,16 @@ function close-proxy() {
 }
 
 function modify() {
+    if [ $# -eq 0 ]; then
+        local raw
+        raw=$(./dot status -p 2>/dev/null)
+        [ -z "$raw" ] && echo "no modified files (dot status clean)" && return 0
+        printf "%s\n" "$raw" | fzf --multi --height 40% --prompt 'modify> ' --border --layout=reverse \
+            --header 'Enter: vimdiff | Tab: multi-select' | while IFS= read -r f; do
+            vim -d "$f" "$HOME/$f" < /dev/tty
+        done
+        return 0
+    fi
     vim -d $1 $HOME/$1
 }
 
