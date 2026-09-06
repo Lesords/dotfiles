@@ -10,12 +10,6 @@ CURRENT_SESSION="$(tmux display -p '#{session_name}')"
 if echo "$CURRENT_SESSION" | grep -q "^floax-"; then
     # Inside popup → close it
     unset_bindings
-
-    if [ -z "$FLOAX_TITLE" ]; then
-        FLOAX_TITLE="$DEFAULT_TITLE"
-    fi
-
-    tmux setenv -g FLOAX_TITLE "$FLOAX_TITLE"
     tmux detach-client
 else
     # Opening floax from origin session
@@ -24,6 +18,9 @@ else
     tmux setenv -g FLOAX_SESSION_NAME "$FLOAX_SESSION_NAME"
     tmux setenv -g ORIGIN_SESSION "$ORIGIN_SESSION"
     set_bindings
+    if [ "$FLOAX_TITLE" = "$LOCKED_TITLE" ]; then
+        tmux setenv -g FLOAX_TITLE "$DEFAULT_TITLE"
+    fi
 
     # Check if the session exists
     if tmux has-session -t "$FLOAX_SESSION_NAME" 2>/dev/null; then

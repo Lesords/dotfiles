@@ -54,13 +54,22 @@ unlock_bindings() {
     fi
 }
 
+toggle_bindings() {
+    if tmux list-keys -T root C-M-f >/dev/null 2>&1; then
+        lock_bindings
+    else
+        unlock_bindings
+    fi
+}
+
 lock_bindings() {
     cleanup_bindings_if_inactive || return 0
     require_origin_session || return 0
-    unset_bindings
+    tmux unbind -n C-M-f
+    tmux unbind -n C-M-r
+    tmux unbind -n C-M-e
     tmux setenv -g FLOAX_TITLE_SAVED "$FLOAX_TITLE"
-    tmux bind -n C-M-u run "$CURRENT_DIR/zoom-options.sh unlock" 
-    change_popup_title "Bindings locked. Unlock with [Ctrl-Alt-u]"
+    change_popup_title "$LOCKED_TITLE"
 }
 
 change_popup_title() {
@@ -91,5 +100,8 @@ case "$1" in
         ;;
     unlock)
         unlock_bindings
+        ;;
+    toggle)
+        toggle_bindings
         ;;
 esac

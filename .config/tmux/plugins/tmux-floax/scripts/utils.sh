@@ -20,9 +20,10 @@ FLOAX_TEXT_COLOR=$(envvar_value FLOAX_TEXT_COLOR)
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLOAX_CHANGE_PATH=$(envvar_value FLOAX_CHANGE_PATH)
 FLOAX_TITLE=$(envvar_value FLOAX_TITLE)
-DEFAULT_TITLE=' FloaX: C-M-f 󰊓   C-M-r 󰑓   C-M-e 󱂬   C-M-d  '
+DEFAULT_TITLE=' FloaX: C-M-f 󰊓   C-M-r 󰑓   C-M-e 󱂬   C-M-u  '
 FLOAX_SESSION_NAME=$(envvar_value FLOAX_SESSION_NAME)
 DEFAULT_SESSION_NAME='scratch'
+LOCKED_TITLE='Bindings locked. Unlock with [Ctrl-Alt-u]'
 
 current_session_name() {
     tmux display-message -p '#{session_name}'
@@ -56,16 +57,16 @@ set_bindings() {
     tmux bind -n C-M-f run "$CURRENT_DIR/zoom-options.sh full"
     tmux bind -n C-M-r run "$CURRENT_DIR/zoom-options.sh reset"
     tmux bind -n C-M-e run "$CURRENT_DIR/embed.sh embed"
-    tmux bind -n C-M-d run "$CURRENT_DIR/zoom-options.sh lock" 
-    tmux bind -n C-M-u run "$CURRENT_DIR/zoom-options.sh unlock"
+    tmux bind -n C-M-u run "$CURRENT_DIR/zoom-options.sh toggle"
 }
 
 unset_bindings() {
-    tmux unbind -n C-M-f 
-    tmux unbind -n C-M-r 
-    tmux unbind -n C-M-e 
-    tmux unbind -n C-M-d 
-    tmux unbind -n C-M-u 
+    tmux unbind -n C-M-f
+    tmux unbind -n C-M-r
+    tmux unbind -n C-M-e
+    tmux unbind -n C-M-u
+    tmux setenv -gu FLOAX_TITLE_SAVED
+    tmux setenv -g FLOAX_TITLE "$DEFAULT_TITLE"
 }
 
 tmux_version() {
