@@ -386,8 +386,8 @@ def _cache_save(cache: dict):
         pass   # cache is best-effort — never block the picker
 
 
-def _display_scan(f: Path, sz: int) -> tuple[str, str]:
-    """(display, first_msg) from the head/tail window only — no full parse."""
+def _display_scan(f: Path, sz: int) -> tuple[str, str, str]:
+    """(display, first_msg, cwd) from the head/tail window only — no full parse."""
     with open(f, errors="replace") as fh:
         head = parse_lines(fh.read(_WINDOW))
         tail = []
@@ -404,7 +404,9 @@ def _display_scan(f: Path, sz: int) -> tuple[str, str]:
     if not display and not msg and sz > _WINDOW:
         with open(f, errors="replace") as fh:   # first message deep in file
             msg = first_message(parse_lines(fh.read(_HEAD_MAX)))
-    return display or msg, msg
+    # entries carry the original unencoded cwd — authoritative project path
+    cwd = next((d.get("cwd") for d in win if d.get("cwd")), "")
+    return display or msg, msg, cwd
 
 
 def _lazy_fill(sessions: list[dict], files: dict, need_counts: bool) -> bool:
@@ -451,8 +453,7 @@ def collect_sessions(need_counts: bool = False):
     for p in sorted(CLAUDE_PROJECTS.iterdir()):
         if not p.is_dir():
             continue
-        real = decode_project_dir(p.name)
-        short = str(real).replace(str(Path.home()), "~") if real else "?"
+        guess = decode_project_dir(p.name)   # fallback when cwd is missing
         for f in sorted(p.glob("*.jsonl"),
                         key=lambda x: x.stat().st_mtime, reverse=True):
             if f.stem.startswith("agent-"):
@@ -463,11 +464,16 @@ def collect_sessions(need_counts: bool = False):
                 uuids, counts = set(hit["uuids"]), hit["counts"]
             else:
                 uuids, counts = None, None   # pending lazy full parse
-            display, msg = _display_scan(f, st.st_size)
+            display, msg, cwd = _display_scan(f, st.st_size)
             if not display:
                 continue
+            # prefer the original unencoded cwd from the file itself over the
+            # lossy encoded-dir decode ('/', '.' and '_' all became '-')
+            real = Path(cwd) if cwd else (guess or Path())
+            rs = str(real)
+            short = rs.replace(str(Path.home()), "~") if rs not in ("", "/") else "?"
             sessions.append({
-                "sid": f.stem, "project": real or Path(),
+                "sid": f.stem, "project": real,
                 "uuids": uuids,
                 "project_short": short, "first_msg": msg,
                 "display": display,
@@ -920,6 +926,8 @@ def cmd_pick():
         if len(parts) >= 4:
             project_path = parts[-2].strip()
             sid = parts[-1].strip()
+            if not os.path.isdir(project_path):
+                project_path = str(Path.home())   # project dir deleted since
             os.chdir(project_path)
             os.execvp("claude", ["claude", "-r", sid])
 
