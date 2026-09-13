@@ -59,12 +59,6 @@ if type zoxide >/dev/null 2>&1; then
     eval "$(zoxide init bash)"
 fi
 
-if [ -n "$SSH_CONNECTION" ]; then
-    tmux setenv -g IS_SSH 1 2>/dev/null
-else
-    tmux setenv -gu IS_SSH 2>/dev/null
-fi
-
 if pgrep -u "$USER" fcitx5 >/dev/null 2>&1; then
     export GTK_IM_MODULE=fcitx5
     export QT_IM_MODULE=fcitx5
