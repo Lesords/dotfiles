@@ -25,11 +25,13 @@ tmux set-option -g @selected       "$(get_tmux_option '@auto_theme_local_selecte
 # status-style re-expands per session (status-fg/bg only take literal colours).
 tmux set-option -g status-style 'fg=#{@foreground},bg=#{@background}'
 
-# Re-apply on session-created/attach/switch. #{hook_session} expands at fire
-# time; sh-level single quotes stop $session-id being eaten as $1/$2/... .
-tmux set-hook -g session-created "run-shell \"$CURRENT_DIR/scripts/apply-theme.sh '#{hook_session}'\""
-tmux set-hook -g client-attached "run-shell \"$CURRENT_DIR/scripts/apply-theme.sh '#{hook_session}'\""
-tmux set-hook -g client-session-changed "run-shell \"$CURRENT_DIR/scripts/apply-theme.sh '#{hook_session}'\""
+# Re-apply on session-created/attach/detach/switch. Hooks take no session arg:
+# client hooks don't set #{hook_session}, so every hook re-evaluates all
+# sessions; each session is judged by its attached clients' real environ.
+tmux set-hook -g session-created "run-shell '$CURRENT_DIR/scripts/apply-theme.sh --all'"
+tmux set-hook -g client-attached "run-shell '$CURRENT_DIR/scripts/apply-theme.sh --all'"
+tmux set-hook -g client-detached "run-shell '$CURRENT_DIR/scripts/apply-theme.sh --all'"
+tmux set-hook -g client-session-changed "run-shell '$CURRENT_DIR/scripts/apply-theme.sh --all'"
 
 # Cover sessions that already exist (e.g. on `prefix R` reload).
 tmux run-shell "$CURRENT_DIR/scripts/apply-theme.sh --all"
