@@ -27,7 +27,8 @@ apply_remote() { # <session-id>
 apply_local() { # <session-id>
   local sess="$1" opt
   for opt in $PALETTE_OPTS; do
-    tmux set-option -u -t "$sess" "$opt" >/dev/null 2>&1
+    # -q: pre-3.4 tmux errors unsetting never-set user options.
+    tmux set-option -uq -t "$sess" "$opt" >/dev/null 2>&1
   done
 }
 
@@ -71,12 +72,15 @@ scrub_session_ssh() {
 }
 
 apply_one() { # <session-id>
-  [ -n "$1" ] || return 0
-  if is_remote "$1"; then
-    apply_remote "$1"
+  local sess="$1" rc
+  [ -n "$sess" ] || return 0
+  if is_remote "$sess"; then
+    apply_remote "$sess"; rc=$?
   else
-    apply_local "$1"
+    apply_local "$sess"; rc=$?
   fi
+  # A session destroyed mid-apply has nothing left to theme - not an error.
+  [ "$rc" -eq 0 ] || ! tmux has-session -t "$sess" 2>/dev/null
 }
 
 apply_all() {
