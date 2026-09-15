@@ -43,18 +43,25 @@ session_env_is_remote() {
   tmux show-environment -t "$1" SSH_CONNECTION 2>/dev/null | grep -q '^SSH_CONNECTION=.\+'
 }
 
+# is_nested_client <pid>: popup/nested clients (TMUX in environ) carry the
+# server's environment, not the viewer's - no evidence for theme or scrub.
+is_nested_client() {
+  tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null | grep -q '^TMUX='
+}
+
 is_remote() { # <session-id>
   local sess="$1" pids pid readable=0
   pids="$(tmux list-clients -t "$sess" -F '#{client_pid}' 2>/dev/null)"
   if [ -n "$pids" ]; then
     for pid in $pids; do
       tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q . || continue
+      is_nested_client "$pid" && continue
       readable=1
       client_is_remote "$pid" && return 0
     done
-    # Live viewers prove a stale SSH record wrong: scrub it so popups and
-    # future sessions stop inheriting it. Skipped when no environ was
-    # readable (e.g. non-Linux) to avoid acting on zero evidence.
+    # Live non-nested viewers prove a stale SSH record wrong: scrub it so
+    # popups and future sessions stop inheriting it. Skipped when no environ
+    # was readable (e.g. non-Linux) to avoid acting on zero evidence.
     if [ "$readable" = 1 ]; then
       scrub_session_ssh "$sess"
       return 1
@@ -84,9 +91,11 @@ apply_one() { # <session-id>
 }
 
 apply_all() {
-  tmux list-sessions -F '#{session_id}' 2>/dev/null | while IFS= read -r sess; do
-    apply_one "$sess"
-  done
+  local fail=0
+  while IFS= read -r sess; do
+    apply_one "$sess" || fail=1
+  done < <(tmux list-sessions -F '#{session_id}' 2>/dev/null)
+  return "$fail"
 }
 
 if [ "$1" = "--all" ] || [ -z "$1" ]; then
