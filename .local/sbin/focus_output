@@ -1,6 +1,8 @@
 #!/bin/bash
 
 direction="$1"
+# 第二个参数传 wrap 时双屏也环绕切换(3 屏及以上默认环绕)
+wrap="$2"
 
 # 获取所有连接的显示器
 outputs=($(xrandr --query | grep " connected" | \
@@ -32,7 +34,7 @@ else
     next_index=$(( current_index + 1 ))
 fi
 
-if (( total >= 3 )); then
+if [[ "$wrap" == "wrap" ]] || (( total >= 3 )); then
     next_index=$(( (next_index + total) % total ))
 elif (( next_index < 0 || next_index >= total )); then
     next_index=$current_index
