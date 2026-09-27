@@ -1,0 +1,12 @@
+// agent-rofi picker — inherits mine.rasi (One Dark)
+@import "mine.rasi"
+
+// rows lead with an inline status glyph, not a 30px icon: drop the empty
+// icon slot and pull the text padding in
+element-icon {
+    enabled: false;
+}
+
+element-text {
+    padding: 0px 13px 0px 4px;
+}

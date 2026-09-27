@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# agent-rofi — desktop agent picker: list agents (@pane_* from
+# tmux-agent-sidebar), Enter retunes the terminal surface you're looking at.
+#   agent-rofi --dry-run  print rows + jump targets, no rofi
+set -u
+# AGENT_ROFI_DEBUG=1 → xtrace to /tmp/agent-rofi-debug.log
+[ "${AGENT_ROFI_DEBUG:-}" = 1 ] && { exec 2>/tmp/agent-rofi-debug.log; set -x; }
+
+mapfile -t rows < <(tmux list-panes -a -F \
+  '#{pane_id}|#{@pane_agent}|#{@pane_status}|#{window_name}|#{session_name}' 2>/dev/null |
+  awk -F'|' '$2 != ""')
+
+[ ${#rows[@]} -eq 0 ] && { command -v notify-send >/dev/null && notify-send -u low "agent-rofi" "no agents running"; exit 0; }
+
+display=()
+for r in "${rows[@]}"; do
+  IFS='|' read -r pane agent status win sess <<<"$r"
+  case $status in   # One Dark status colors; emoji keep their own
+    waiting)    dot='<span foreground="#E06C75">⏳</span>' ;;
+    running)    dot='<span foreground="#E5C07B">⚡</span>' ;;
+    background) dot='<span foreground="#5C6370">🌙</span>' ;;
+    idle)       dot='<span foreground="#98C379">💤</span>' ;;
+    *)          dot='<span foreground="#5C6370">?</span>' ;;
+  esac
+
+  # name ← ~/.claude/sessions via @pane_session_id, else cwd basename
+  # (window_name degrades to the foreground command). @pane_prompt rides
+  # along as context. tmux escapes control chars, so | separates — the
+  # prompt is last and read keeps it verbatim, embedded | included.
+  sid=""; cwd=""; prompt=""
+  IFS='|' read -r sid cwd prompt < <(tmux display-message -p -t "$pane" \
+    '#{@pane_session_id}|#{@pane_cwd}|#{@pane_prompt}' 2>/dev/null)
+  name=""
+  [ -n "$sid" ] &&
+    name=$(jq -r --arg s "$sid" 'select(.sessionId == $s) | .name' \
+      "$HOME"/.claude/sessions/*.json 2>/dev/null | head -1)
+  [ -z "$name" ] && [ -n "$cwd" ] && name=${cwd##*/}
+  [ -z "$name" ] && name=$win
+
+  read -r prompt <<<"$prompt"                 # first line, trimmed
+  [ ${#prompt} -gt 48 ] && prompt="${prompt:0:48}…"
+  # markup rows: neutralize any &<> in interpolated text
+  name=${name//&/&amp;} name=${name//</&lt;} name=${name//>/&gt;}
+  prompt=${prompt//&/&amp;} prompt=${prompt//</&lt;} prompt=${prompt//>/&gt;}
+
+  line="$dot  ${agent} · ${name:-?}"
+  [ -n "$prompt" ] && line+="   <span foreground=\"#5C6370\" size=\"smaller\">${prompt}</span>"
+  display+=("$line")
+done
+
+if [ "${1:-}" = "--dry-run" ]; then
+  for i in "${!rows[@]}"; do
+    IFS='|' read -r pane agent status win sess <<<"${rows[i]}"
+    printf '%s   -> jump session=%s pane=%s\n' "${display[i]}" "$sess" "$pane"
+  done
+  exit 0
+fi
+
+# agents.rasi → mine.rasi for the desktop look; plain default if it's gone
+targs=(-normal-window)
+[ -f "$HOME/.config/rofi/agents.rasi" ] && targs+=(-theme "$HOME/.config/rofi/agents.rasi")
+idx=$(printf '%s\n' "${display[@]}" |
+  rofi -dmenu -i -markup-rows -format i -p agents "${targs[@]}" 2>/dev/null)
+[ -z "$idx" ] && exit 0    # Esc / no selection
+[[ $idx =~ ^[0-9]+$ ]] && (( idx < ${#rows[@]} )) || exit 0   # -format i is 0-based
+sleep 0.15   # let i3 hand focus back after rofi closes, or it yanks it later
+
+IFS='|' read -r pane agent status win sess <<<"${rows[idx]}"
+
+jump() { tmux switch-client -c "$1" -t "$sess" \; select-window -t "$pane" \; select-pane -t "$pane"; }
+# exact-id focus only — bare class focus marches i3 through every match
+raise() { [ -n "$1" ] && i3-msg "[id=$1] focus" >/dev/null 2>&1; }
+wxid()  { i3-msg -t get_tree 2>/dev/null |
+  jq -r '.. | select(.window_properties?.class? == "org.wezfurlong.wezterm") | .window' | head -1; }
+wjson=$(wezterm cli --no-auto-start list --format json 2>/dev/null)
+
+# Preferred: the focused window's X title names the visible tab ("[k/m] T",
+# or "T" for single-tab) — retune that tab's client in place, no raise.
+xtitle=$(i3-msg -t get_tree 2>/dev/null |
+  jq -r '.. | select(.focused? == true and .window_properties?.class? == "org.wezfurlong.wezterm") | .name' | head -1)
+ftab=$xtitle; fk=0; fm=0
+[[ $xtitle =~ ^\[([0-9]+)/([0-9]+)\]\ (.*)$ ]] && { fk=${BASH_REMATCH[1]}; fm=${BASH_REMATCH[2]}; ftab=${BASH_REMATCH[3]}; }
+while IFS= read -r t; do
+  tmux list-clients -F '#{client_name}' 2>/dev/null | grep -qx "$t" && { jump "$t"; exit 0; }
+done < <(printf '%s' "$wjson" | jq -r --arg t "$ftab" --argjson k "$fk" --argjson m "$fm" '
+  group_by(.window_id)[] | . as $w
+  | select($m == 0 or (($w | length) == $m and $w[($k - 1)].title == $t))
+  | (if $m == 0 then $w[] | select(.title == $t) else $w[($k - 1)] end) | .tty_name')
+
+# Fallback: most recently active client; activate its tab, raise by exact
+# "[k/m] title" anchor (X title sync can lag, hence the retries).
+client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null |
+  sort -rn | head -1 | cut -d' ' -f2)
+[ -n "$client" ] || exit 0
+read -r wpane wregex < <(printf '%s' "$wjson" | jq -r --arg t "$client" '
+  group_by(.window_id)[] | . as $w | ($w[] | select(.tty_name == $t)) as $p
+  | ($w | length) as $m | ($w | map(.tab_id) | index($p.tab_id) + 1) as $k
+  | "\($p.pane_id) " + (if $m == 1 then "^\($p.title)$"
+      else "^\\[\($k)/\($m)\\] \($p.title)$" end)')
+out=""
+if [ -n "$wpane" ]; then
+  wezterm cli --no-auto-start activate-pane --pane-id "$wpane" >/dev/null 2>&1
+  for _ in 1 2 3; do
+    sleep 0.2
+    out=$(i3-msg "[class=\"org.wezfurlong.wezterm\" title=\"${wregex}\"] focus" 2>/dev/null)
+    [[ "$out" == *'"success":true'* ]] && break   # [[ == ]] globs; [ = ] doesn't
+    out=""
+  done
+fi
+[ -n "$out" ] || raise "$(wxid)"
+jump "$client"
