@@ -751,6 +751,14 @@ PAGE = r"""<!doctype html>
 <div id="err" hidden style="color:#f38ba8;padding:24px 4px"></div>
 <div id="ping" style="position:fixed;right:10px;top:calc(6px + env(safe-area-inset-top));
      font-size:11px;color:#3a4160;z-index:5"></div>
+<div id="mute" style="position:fixed;left:10px;top:calc(6px + env(safe-area-inset-top));
+     font-size:15px;color:#3a4160;z-index:5;cursor:pointer">🔔</div>
+<div id="wbar" hidden style="position:fixed;left:50%;transform:translateX(-50%);
+     bottom:calc(16px + env(safe-area-inset-bottom));max-width:86%;white-space:nowrap;
+     overflow:hidden;text-overflow:ellipsis;background:rgba(74,47,54,.94);
+     color:#f38ba8;text-align:center;font-size:13px;font-weight:600;
+     padding:10px 20px;z-index:11;cursor:pointer;border-radius:18px;
+     border:1px solid rgba(243,139,168,.35);box-shadow:0 4px 16px rgba(0,0,0,.45)"></div>
 <div id="list"></div>
 <div id="empty" hidden>no agents running</div>
 <div id="chat"><header><span id="chat-ico"></span><span class="name" id="chat-name"></span>
@@ -828,6 +836,70 @@ function setErr(msg) {
   document.getElementById('empty').hidden = true;
 }
 function clearErr() { document.getElementById('err').hidden = true; }
+/* ---- layer-1 alerts (page open): title badge + beep + vibrate, orca's
+   foreground-notification equivalent. Real push stays a separate concern. */
+let audioCtx = null, alertMute = false;
+try { alertMute = localStorage.getItem('mute') === '1'; } catch {}
+const muteBtn = document.getElementById('mute');
+muteBtn.textContent = alertMute ? '🔕' : '🔔';
+muteBtn.onclick = () => {
+  alertMute = !alertMute;
+  try { localStorage.setItem('mute', alertMute ? '1' : '0'); } catch {}
+  muteBtn.textContent = alertMute ? '🔕' : '🔔';
+};
+function beep(seq) {
+  if (alertMute) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    let t = audioCtx.currentTime;
+    for (const [f, d] of seq) {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = f; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.12, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + d);
+      o.start(t); o.stop(t + d);
+      t += d + 0.12;
+    }
+  } catch {}
+}
+const prevSt = {};
+let waitRows = [];
+function diffAlerts(rows) {
+  let nWait = 0, newWait = false;
+  for (const r of rows) {
+    const was = prevSt[r.pane];
+    prevSt[r.pane] = r.status;
+    if (r.status === 'waiting') nWait++;
+    if (r.status === 'waiting' && was && was !== 'waiting') newWait = true;
+    else if (was === 'running' && (r.status === 'idle' || r.status === 'background'))
+      beep([[520, 0.12]]);                // a task finished — one soft ping
+  }
+  document.title = nWait ? `(${nWait}) agents ⏳` : 'agents';
+  // banner: only agents OTHER than the chat we're already inside —
+  // jumping to a waiting agent IS handling it, don't nag about yourself
+  waitRows = rows.filter(r => r.status === 'waiting' && r.pane !== chatPane);
+  const bar = document.getElementById('wbar');   // the one mobile-visible
+  bar.hidden = !waitRows.length;                 // layer-1 signal
+  if (waitRows.length) {
+    const w = waitRows[0];
+    bar.textContent = `⏳ ${w.title || w.window} 等待授权` +
+                      (waitRows.length > 1 ? ` +${waitRows.length - 1}` : '');
+    // list view: snackbar at the bottom; inside a chat the bottom belongs
+    // to the composer, so dock the pill under the header instead
+    const inChat = document.getElementById('chat').classList.contains('on');
+    bar.style.top = inChat ? 'calc(56px + env(safe-area-inset-top))' : 'auto';
+    bar.style.bottom = inChat ? 'auto'
+                             : 'calc(16px + env(safe-area-inset-bottom))';
+  }
+  if (newWait) {
+    beep([[880, 0.15], [660, 0.15], [880, 0.25]]);
+    if (!alertMute && navigator.vibrate) navigator.vibrate([150, 80, 150]);
+  }
+}
+document.getElementById('wbar').onclick = () => {
+  if (waitRows[0]) openChat(waitRows[0].pane, waitRows[0]);
+};
 async function tick() {
   const t0 = performance.now();
   let res;
@@ -848,6 +920,7 @@ async function tick() {
   chkVer(d.ver);
   const rows = d.agents;
   rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));  // most recently used first
+  diffAlerts(rows);
   const sig = JSON.stringify(rows);
   if (sig === lastRowsSig) return;        // nothing changed: keep the DOM
   lastRowsSig = sig;                       // (and the open previews with it)
@@ -1136,7 +1209,8 @@ let chatStatus = '';
 const KEYNAME = { esc:'Escape', enter:'Enter', tab:'Tab', up:'Up', down:'Down',
                   left:'Left', right:'Right', bs:'BSpace', int:'C-c' };
 async function openTerm(pane) {
-  try { await loadXterm(); }
+  document.getElementById('wbar').hidden = true;   // status polling pauses
+  try { await loadXterm(); }                       // here — stale pill would
   catch { alert('xterm.js 加载失败'); return; }
   if (!window.Terminal || !window.FitAddon) { alert('xterm.js 加载失败'); return; }
   closeTerm();
@@ -1200,7 +1274,8 @@ document.getElementById('keys').onclick = ev => {
   if (term) term.focus();
 };
 function esc(s) { const d = document.createElement('b'); d.textContent = s||''; return d.innerHTML; }
-setInterval(() => { if (document.visibilityState === 'visible' && !term) tick(); }, 2000);
+setInterval(() => { if (!term) tick(); }, 2000);  // keep polling in background
+// tabs too (throttled by the browser) so the title badge stays live
 document.addEventListener('visibilitychange', () => { if (!term) tick(); });
 tick();
 </script></body></html>"""
