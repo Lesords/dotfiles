@@ -1,0 +1,10 @@
+[Unit]
+Description=agent-server (mobile agent status + terminal over tmux)
+
+[Service]
+ExecStart=%h/.local/sbin/agent-server
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

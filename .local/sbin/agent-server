@@ -1,0 +1,1443 @@
+#!/usr/bin/env python3
+"""agent-server — mobile status viewer + live terminal for agents in tmux.
+
+Thin layer over the @pane_* pane options that tmux-agent-sidebar maintains.
+Status is read live via `tmux list-panes` on every request (nothing cached);
+terminals mirror ONE agent pane (capture-pane dump + pipe-pane stream,
+send-keys input) — the phone sees the agent's own screen, no tmux chrome.
+
+  agent-server [--port 7678] [--bind 0.0.0.0]
+      HTTP on --port: page + /api/status + /api/preview
+      WS   on port+1: /api/term/<pane> (xterm.js on the phone)
+
+Endpoints (all but / require ?token=):
+  /                      embedded single-page UI (list, preview, terminal)
+  /api/status            agent rows as JSON
+  /api/preview/<pane>    last 30 lines of the pane (tmux capture-pane)
+  /api/term/<pane>  (WS) live terminal: binary frames = tty bytes, first
+                         text frame {"cols","rows"} sets the pty size
+
+Token: generated once into ~/.config/agent-server/token (0600). The startup
+banner prints phone URLs. No TLS — keep it on LAN/Tailscale; the token only
+guards the API, and /api/term hands out the agent keyboard.
+"""
+import argparse
+import asyncio
+import glob
+import gzip
+import hashlib
+import json
+import os
+import re
+import secrets
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+import websockets
+
+CONF_DIR = os.path.expanduser("~/.config/agent-server")
+FIELDS = "#{pane_id}\t#{@pane_agent}\t#{@pane_status}\t#{window_name}\t#{session_name}\t#{pane_current_path}\t#{@pane_started_at}\t#{@pane_notification_run_id}\t#{@pane_session_id}"
+PANE_RE = re.compile(r"^%\d+$")
+ASSETS = {
+    "/assets/xterm.js": ("text/javascript; charset=utf-8", "xterm.js"),
+    "/assets/xterm.css": ("text/css; charset=utf-8", "xterm.css"),
+    "/assets/fit.js": ("text/javascript; charset=utf-8", "fit.js"),
+}
+TOKEN = ""
+TMUX = "/usr/bin/tmux" if os.path.exists("/usr/bin/tmux") else "tmux"
+ASSET_GZ = {}        # path -> precompressed bytes; xterm.js is 283KB and
+                     # would cost ~10ms CPU on every page load otherwise
+ASSET_URLS = {
+    "xterm.js": "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js",
+    "xterm.css": "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css",
+    "fit.js": "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js",
+}
+
+
+def ensure_assets():
+    """Self-bootstrap on a fresh machine: fetch missing terminal assets once
+    (a first terminal open would 404 otherwise — `dot install` ships no
+    vendor files by design). Best-effort; offline just means no ⌨."""
+    d = os.path.join(CONF_DIR, "assets")
+    os.makedirs(d, exist_ok=True)
+    for name, url in ASSET_URLS.items():
+        p = os.path.join(d, name)
+        if os.path.exists(p) and os.path.getsize(p) > 0:
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=30) as r, open(p, "wb") as f:
+                f.write(r.read())
+        except Exception:
+            pass
+
+
+def bad_token(query):
+    t = parse_qs(query).get("token", [""])[0]
+    return not (t.isascii() and secrets.compare_digest(t, TOKEN))
+
+
+def load_token():
+    os.makedirs(CONF_DIR, exist_ok=True)
+    path = os.path.join(CONF_DIR, "token")
+    try:
+        with open(path) as f:
+            t = f.read().strip()
+            if t:
+                return t
+    except FileNotFoundError:
+        pass
+    t = secrets.token_hex(12)
+    with open(path, "w") as f:
+        f.write(t)
+    os.chmod(path, 0o600)
+    return t
+
+
+TITLE_CACHE = {}          # sid -> (fetched_at, title); 60s TTL
+
+
+def session_title(sid):
+    """Last custom-title, else last ai-title, from the session's jsonl tail.
+    Cached — the list polls every 2s and must not tail N files each time."""
+    if not sid:
+        return ""
+    now = time.time()
+    c = TITLE_CACHE.get(sid)
+    if c and now - c[0] < 60:
+        return c[1]
+    title = ""
+    p = transcript_path(sid)
+    if p:
+        try:
+            size = os.path.getsize(p)
+            with open(p, "rb") as fh:
+                fh.seek(max(0, size - 65536))
+                tail = fh.read().decode(errors="replace")
+            ai = ""
+            for line in tail.splitlines():
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("type") == "custom-title" and e.get("customTitle"):
+                    title = e["customTitle"]        # keep the last one
+                elif e.get("type") == "ai-title" and e.get("aiTitle"):
+                    ai = e["aiTitle"]
+            title = title or ai
+        except OSError:
+            pass
+    TITLE_CACHE[sid] = (now, title)
+    if len(TITLE_CACHE) > 64:            # cap: drop the oldest beyond 64
+        for k in sorted(TITLE_CACHE, key=lambda k: TITLE_CACHE[k][0])[:len(TITLE_CACHE) - 64]:
+            del TITLE_CACHE[k]
+    return title
+
+
+USAGE_CACHE = {}   # path -> ((size, mtime_ns), ctx, out) — the chat poll
+                    # hits this every 700ms; skip the tail read when the
+                    # transcript has not changed
+
+
+def session_usage(path):
+    """Token usage from the newest assistant entry's usage record.
+    ctx = input + cache_read + cache_creation ≈ what the next call re-reads."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None, None
+    sig = (st.st_size, st.st_mtime_ns)
+    hit = USAGE_CACHE.get(path)
+    if hit and hit[0] == sig:
+        return hit[1], hit[2]
+    ctx = out = None
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(max(0, st.st_size - 65536))
+            tail = fh.read().decode(errors="replace")
+        for line in reversed(tail.splitlines()):
+            try:
+                u = json.loads(line).get("message", {}).get("usage")
+            except ValueError:
+                continue
+            if u and u.get("input_tokens") is not None:
+                ctx = (u.get("input_tokens", 0)
+                       + u.get("cache_read_input_tokens", 0)
+                       + u.get("cache_creation_input_tokens", 0))
+                out = u.get("output_tokens", 0)
+                break
+    except OSError:
+        pass
+    USAGE_CACHE[path] = (sig, ctx, out)
+    return ctx, out
+
+
+def agent_rows():
+    try:
+        out = subprocess.run(
+            [TMUX, "list-panes", "-a", "-F", FIELDS],
+            capture_output=True, text=True, errors="replace",
+            timeout=3,
+        ).stdout
+    except Exception:
+        return []
+    rows = []
+    now = time.time()
+    for line in out.splitlines():
+        f = line.split("\t")
+        if len(f) != 9 or not f[1]:
+            continue
+        ts = 0.0
+        for cand in (f[6], f[7]):             # started_at(s) / run_id(ms)
+            if cand.isdigit():
+                v = int(cand)
+                if v > 10**12:
+                    v /= 1000.0
+                ts = max(ts, v)
+        age = ""
+        if ts:
+            sec = max(0, int(now - ts))
+            age = f"{sec}s" if sec < 60 else f"{sec//60}m" if sec < 3600 else f"{sec//3600}h"
+        rows.append({
+            "pane": f[0], "agent": f[1], "status": f[2],
+            "window": f[3] or "?", "session": f[4],
+            "project": os.path.basename(f[5]) or f[5] or "?",
+            "ts": ts, "age": age, "title": session_title(f[8]),
+        })
+    return rows
+
+
+def pane_preview(pane):
+    if not PANE_RE.match(pane):
+        return "(bad pane id)"
+    try:
+        return subprocess.run(
+            [TMUX, "capture-pane", "-p", "-S", "-30", "-t", pane],
+            capture_output=True, text=True, errors="replace",
+            timeout=3,
+        ).stdout.rstrip("\n")
+    except Exception:
+        return "(capture failed — pane gone?)"
+
+
+def pane_geometry(pane):
+    """(cols, rows, session) of a pane, or None when it is gone."""
+    try:
+        out = subprocess.run(
+            [TMUX, "display-message", "-p", "-t", pane,
+             "#{pane_width} #{pane_height} #{session_name}"],
+            capture_output=True, text=True, errors="replace",
+            timeout=3,
+        ).stdout.strip()
+    except Exception:
+        return None
+    f = out.split(" ", 2)            # session names may contain spaces —
+    if len(f) != 3 or not (f[0].isdigit() and f[1].isdigit()):  # cols/rows
+        return None                  # never do
+    return int(f[0]), int(f[1]), f[2]
+
+
+def transcript_path(session_id):
+    if not re.match(r"^[0-9a-f-]{36}$", session_id):
+        return None
+    import glob
+    hits = glob.glob(os.path.expanduser(
+        f"~/.claude/projects/*/{session_id}.jsonl"))
+    return hits[0] if hits else None
+
+
+def read_chat(path, after):
+    """Messages from the transcript after byte offset `after` (append-only).
+
+    Returns (new_offset, messages). User texts and assistant text blocks
+    become chat messages; tool calls collapse to a one-liner. Sidechain
+    (subagent) entries and system wrappers are skipped.
+    """
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return after, after, []
+    if after < 0 or after > size:            # first fetch / file rotated
+        after = max(0, size - 131072)
+    elif after < size - 262144:              # stale client: clamp, never
+        after = max(0, size - 131072)        # parse the whole history
+    try:
+        with open(path, errors="replace") as f:
+            f.seek(after)
+            chunk = f.read()
+    except OSError:
+        return after, after, []
+    cut = chunk.rfind("\n")                  # keep the partial tail for next poll
+    if cut < 0:
+        return after, after, []
+    return after + cut + 1, after, parse_msgs(chunk[:cut].splitlines())
+
+
+def parse_msgs(lines):
+    msgs = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("isSidechain"):
+            continue
+        etype, ts = e.get("type"), e.get("timestamp", "")
+        content = (e.get("message") or {}).get("content")
+        if etype == "user" and isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if etype == "user" and b.get("type") == "text":
+                t = b.get("text", "").strip()
+                if not t:
+                    continue
+                mc = re.match(r"<command-name>(.*?)</command-name>", t)
+                if mc:                  # slash command run in the TUI
+                    msgs.append({"role": "user", "ts": ts, "text": mc.group(1)})
+                elif not t.startswith(("<local-command", "<task-notification",
+                                        "<system-reminder")):
+                    # a prompt may OPEN with a paste — collapse the payload,
+                    # keep the user's own words around it. The closing tag is
+                    # usually ABSENT in transcript entries, so also eat the
+                    # unterminated tail.
+                    t = re.sub(r"\s*<pasted_content[^>]*>.*?(</pasted_content>\s*|$)",
+                               "\n📎 粘贴内容", t, flags=re.S).strip()
+                    msgs.append({"role": "user", "ts": ts, "text": t,
+                                 "pu": e.get("parentUuid", "")})
+            elif etype == "assistant" and b.get("type") == "text":
+                t = b.get("text", "").strip()
+                if t:
+                    msgs.append({"role": "assistant", "ts": ts, "text": t})
+            elif etype == "assistant" and b.get("type") == "tool_use":
+                name = b.get("name", "tool")
+                brief = ""
+                inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                for k in ("command", "file_path", "pattern", "description",
+                          "query", "url", "path"):
+                    v = inp.get(k)
+                    if isinstance(v, str) and v.strip():
+                        brief = v.strip().split("\n")[0][:60]
+                        break
+                msgs.append({"role": "tool", "ts": ts,
+                             "text": name + (": " + brief if brief else "")})
+            elif etype == "assistant" and b.get("type") == "thinking":
+                t = (b.get("thinking") or b.get("text") or "").strip()
+                if t:
+                    msgs.append({"role": "think", "ts": ts, "text": t[:2000]})
+    return msgs
+
+
+def read_chat_before(path, before, window=262144):
+    """One older page ENDING at byte `before` (a line boundary) — the chat's
+    load-older pill pages history backwards. start==0 means fully loaded."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return before, True, []
+    before = min(before, size)
+    start = max(0, before - window)
+    try:
+        with open(path, "rb") as f:     # binary: text-mode read(n) counts
+            f.seek(start)               # CHARS not bytes — multibyte text
+            raw = f.read(before - start)  # would read past the boundary
+    except OSError:
+        return before, False, []
+    if start > 0:
+        nl = raw.find(b"\n")            # align head to a line boundary: it
+        if nl < 0:                      # becomes the NEXT page's end —
+            return before, False, []    # mid-line it would tear one message
+        start += nl + 1                 # in half (one lost per page)
+        raw = raw[nl + 1:]
+    return start, start == 0, parse_msgs(raw.decode(errors="replace").split("\n"))
+
+
+
+
+# keys the phone may send as {"key": ...} — tmux key names only, no shell
+KEY_WHITELIST = {"Enter", "Escape", "Tab", "BSpace", "Up", "Down", "Left", "Right", "C-c"}
+
+
+def transcript_pending_tool(path):
+    """The unanswered tool_use the transcript ends on: (name, summary,
+    started_ts), None when a user/result entry already closed it. Truthy/
+    falsy keeps serving the permission gate; the tuple feeds the live-status
+    fallback for panes whose working line a full-screen tool pushed away."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            f.seek(max(0, size - 16384))
+            lines = f.read().decode(errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("isSidechain"):
+            continue
+        t = e.get("type")
+        if t == "assistant":
+            blocks = (e.get("message") or {}).get("content") or []
+            for b in reversed(blocks):        # newest tool_use in the message
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    inp = b.get("input") or {}
+                    summ = ""
+                    for k in ("command", "file_path", "pattern", "description",
+                              "query", "url", "path", "prompt"):
+                        if inp.get(k):
+                            summ = str(inp[k])[:60]
+                            break
+                    try:
+                        dt = datetime.fromisoformat(
+                            e["timestamp"].replace("Z", "+00:00"))
+                        if dt.tzinfo is None:   # no Z suffix → UTC, not
+                            dt = dt.replace(tzinfo=timezone.utc)  # local tz
+                        ts = dt.timestamp()
+                    except (KeyError, ValueError):
+                        ts = None
+                    return b.get("name", "?"), summ, ts
+            return None
+        if t == "user":                       # a result/response came after
+            return None
+    return None
+
+
+def detect_perm(pane):
+    """Parse the LIVE screen for a permission dialog (ground truth — the
+    @pane_wait_reason latch can be stale in both directions).
+
+    Claude Code dialogs end in numbered option lines; require at least two
+    recognizable options before claiming a dialog is up, and return the
+    actual numbers so the buttons always match the screen.
+    """
+    try:
+        out = subprocess.run(
+            [TMUX, "capture-pane", "-p", "-S", "-12", "-t", pane],
+            capture_output=True, text=True, errors="replace",
+            timeout=3,
+        ).stdout
+    except Exception:
+        return None
+    opts = {}
+    for line in reversed(out.splitlines()):   # bottom-up: the live dialog is
+        m = re.match(r"\s*[❯> ]?\s*([1-9])[.)]\s*(.+?)\s*$", line)  # at the
+        if not m:                              # bottom; a numbered list in
+            continue                           # the transcript above must
+                                               # not steal its digits
+        num, txt = m.group(1), m.group(2).lower()
+        if re.search(r"don'?t ask|always|不再", txt):
+            opts.setdefault("always", num)
+        elif re.match(r"^(yes|allow|proceed|approve|允许)", txt):
+            opts.setdefault("allow", num)
+        elif re.match(r"^(no|deny|skip|cancel|拒绝)", txt):
+            opts.setdefault("deny", num)
+    return opts if len(opts) >= 2 else None
+
+
+def capture_tail(pane, lines=24):   # wide enough that a multi-line draft
+    # in the TUI input box can't push the working line out of view
+    """Read-only snapshot of the pane's last N rendered lines — feeds both
+    the footer and the working-line parsers (one subprocess per poll)."""
+    try:
+        return subprocess.run(
+            [TMUX, "capture-pane", "-p", "-S", f"-{lines}", "-t", pane],
+            capture_output=True, text=True, errors="replace",
+            timeout=3,
+        ).stdout
+    except Exception:
+        return ""
+
+
+def pane_ctx(text):
+    """Context usage % and model from the TUI's own footer line — the same
+    number the statusline renders, so no window-size guessing. The [1m]
+    window marker nests a second ']' before the bar."""
+    for line in reversed(text.splitlines()):
+        m = re.search(r"\[([^\]]+)\]+\s*[█▓▒░]{3,}\s*(\d{1,3})%", line)
+        if m:
+            model = m.group(1)
+            if model.endswith("[1m"):
+                model += "]"
+            return model, int(m.group(2))
+    return None, None
+
+
+def pane_live(text):
+    """The TUI's working line — present while thinking AND while tools run:
+    '<spinner> <Gerund>… (2m 9s · ↓ 7.4k tokens)'. The transcript only lands
+    per completed message, so this screen line is the only live progress.
+    The leading glyph is an animated spinner (✶/·/…), so anchor on the
+    '… (… · ↓ … tokens)' signature instead of the glyph."""
+    for line in text.splitlines():
+        m = re.search(r"(\S+)… \(([^()]*· ↓ [^()]*tokens)\)", line)
+        if m:
+            return m.group(1), m.group(2).replace(" tokens", "")
+    return None, None
+
+
+def resize_pane(pane, cols, rows):
+    subprocess.run(
+        [TMUX, "resize-pane", "-t", pane, "-x", str(cols), "-y", str(rows)],
+        capture_output=True, timeout=3,
+    )
+
+
+TERM_REFCOUNT = {}                     # pane -> open mirrors
+
+
+async def term_handler(ws, path):
+    """Mirror ONE agent pane, orca-style: the PHONE drives the geometry.
+
+    Flow (orca's terminal.resizeForClient + restore, on tmux primitives):
+    1. server sends {"ready": 1}
+    2. client fits xterm to its viewport and replies {"cols", "rows"}
+       (re-sent on rotation / keyboard toggles)
+    3. server resizes the pane to that geometry — the agent redraws at
+       phone size and pipe-pane streams it — then sends the effective
+       geometry plus a capture-pane dump as the initial screen
+    4. on disconnect the LAST viewer closes the pipe and restores the
+       pane's original size.
+
+    tmux allows one pipe per pane: the newest connection owns the stream
+    (a fast phone reconnect takes over cleanly); refcounting keeps an
+    earlier connection's cleanup from tearing down a live viewer's pipe.
+    """
+    u = urlparse(path)
+    if bad_token(u.query):
+        await ws.close(code=4403, reason="bad token")
+        return
+    m = re.match(r"^/api/term/(%\d+)$", u.path)
+    if not m:
+        await ws.close(code=4400, reason="bad path")
+        return
+    pane = m.group(1)
+    geo = pane_geometry(pane)
+    if not geo:
+        await ws.send(json.dumps({"error": "pane gone"}))
+        await ws.close()
+        return
+    orig_w, orig_h, _sess = geo
+    fifo = f"/tmp/agent-server-{os.getpid()}-{id(ws):x}.fifo"
+    fd = -1
+    loop = asyncio.get_event_loop()
+    TERM_REFCOUNT[pane] = TERM_REFCOUNT.get(pane, 0) + 1
+    watchdog = None
+
+    async def death_watch():
+        # pipe EOF alone just freezes the reader — poll pane liveness and
+        # tell the phone when the pane is really gone
+        while True:
+            await asyncio.sleep(5)
+            if await asyncio.to_thread(pane_geometry, pane) is None:
+                try:
+                    await ws.send(json.dumps({"error": "pane gone"}))
+                except Exception:
+                    pass
+                await ws.close()
+                return
+
+    try:                     # everything below mutates pane state — cleanup
+        await ws.send(json.dumps({"ready": 1}))   # must run on ANY exit
+        cols = rows = None
+        try:
+            first = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            cols, rows = first.get("cols"), first.get("rows")
+        except Exception:
+            pass
+        if not (isinstance(cols, int) and isinstance(rows, int)
+                and 10 <= cols <= 500 and 10 <= rows <= 300):
+            cols, rows = orig_w, orig_h          # no usable dims: pane-native
+        await asyncio.to_thread(resize_pane, pane, cols, rows)
+        # resize-pane is a request — the window layout may clamp it (other
+        # panes' minimums), so report the geometry tmux actually granted
+        eff = await asyncio.to_thread(pane_geometry, pane)
+        if eff:
+            cols, rows = eff[0], eff[1]
+        await ws.send(json.dumps({"cols": cols, "rows": rows}))
+
+        try:
+            init = await asyncio.to_thread(
+                subprocess.run,
+                [TMUX, "capture-pane", "-e", "-p", "-S", "-2000", "-t", pane],
+                capture_output=True, timeout=3)
+            await ws.send(init.stdout)
+        except Exception:
+            pass
+
+        try:
+            os.mkfifo(fifo)
+        except FileExistsError:
+            pass
+        await asyncio.to_thread(
+            subprocess.run,
+            [TMUX, "pipe-pane", "-t", pane, f"cat >{fifo}"],
+            capture_output=True, timeout=3)
+        fd = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+
+        def pump():
+            try:
+                data = os.read(fd, 65536)
+            except BlockingIOError:
+                return
+            except OSError:
+                data = b""
+            if data:
+                t = asyncio.ensure_future(ws.send(data))
+                # retrieve (to silence) unless cancelled — .exception() on a
+                # cancelled task itself raises
+                t.add_done_callback(lambda t: t.cancelled() or t.exception())
+            else:
+                loop.remove_reader(fd)
+
+        loop.add_reader(fd, pump)
+        watchdog = asyncio.ensure_future(death_watch())
+        watchdog.add_done_callback(lambda t: t.cancelled() or t.exception())
+        async for msg in ws:
+            if not isinstance(msg, str):
+                continue
+            try:
+                c = json.loads(msg)
+            except ValueError:
+                continue
+            if isinstance(c.get("key"), str) and c["key"] in KEY_WHITELIST:
+                await asyncio.to_thread(
+                    subprocess.run,
+                    [TMUX, "send-keys", "-t", pane, c["key"]],
+                    capture_output=True, timeout=3)
+            elif isinstance(c.get("text"), str):
+                # send-keys argv caps near 128KB per arg — chunk big pastes
+                text = c["text"][:32768]
+                for i in range(0, len(text), 8192):
+                    await asyncio.to_thread(
+                        subprocess.run,
+                        [TMUX, "send-keys", "-t", pane, "-l", text[i:i + 8192]],
+                        capture_output=True, timeout=3)
+            elif (isinstance(c.get("cols"), int) and isinstance(c.get("rows"), int)
+                    and 10 <= c["cols"] <= 500 and 10 <= c["rows"] <= 300):
+                await asyncio.to_thread(resize_pane, pane, c["cols"], c["rows"])
+    except (websockets.exceptions.ConnectionClosed, ConnectionError,
+            BrokenPipeError):
+        pass         # client vanished mid-setup — the finally block is the
+                     # part that matters; websockets would log the traceback
+    finally:
+        if watchdog:
+            watchdog.cancel()
+        if fd >= 0:
+            try:
+                loop.remove_reader(fd)
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(fifo)
+        except OSError:
+            pass
+        if TERM_REFCOUNT.get(pane, 1) <= 1:
+            TERM_REFCOUNT.pop(pane, None)
+            await asyncio.to_thread(
+                subprocess.run, [TMUX, "pipe-pane", "-t", pane],
+                capture_output=True, timeout=3)
+            await asyncio.to_thread(resize_pane, pane, orig_w, orig_h)
+        else:
+            TERM_REFCOUNT[pane] -= 1     # another viewer still mirrors this
+
+
+PAGE = r"""<!doctype html>
+<html lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>agents</title>
+<style>  :root { color-scheme: dark; }
+  body { margin:0; background:#11121a; color:#cdd0e0;
+         font:15px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;
+         padding: max(12px, env(safe-area-inset-top)) 14px 24px; }
+  .row { display:flex; align-items:center; gap:10px; padding:11px 8px;
+         border-bottom:1px solid #1e2130; cursor:pointer; }
+  .row:active { background:#171a26; }
+  .ico { width:22px; text-align:center; flex:none; }
+  .rmain { flex:1; min-width:0; }          /* shrinks; carries both lines */
+  .win { display:block; color:#e8eaf6; font-weight:500;
+         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rsub { color:#5b6280; font-size:12px; margin-top:2px;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .btns { flex:none; margin-left:8px; }
+  .btns span { padding:6px 10px; margin-left:6px; border:1px solid #2a2f45;
+               border-radius:6px; color:#8a91b0; font-size:15px; }
+  pre { margin:0 0 12px; padding:10px; background:#0c0d14; border-radius:8px;
+        color:#8a91b0; font:12px/1.45 ui-monospace,monospace;
+        white-space:pre-wrap; word-break:break-all; }
+  #empty { color:#5b6280; padding:24px 4px; }
+  #term { position:fixed; top:0; left:0; right:0; height:var(--vh,100dvh);
+          z-index:10; background:#0c0d14; display:none; flex-direction:column; }
+  #term.on { display:flex; }
+  #chat { position:fixed; top:0; left:0; right:0; height:var(--vh,100dvh);
+          z-index:9; background:#11121a; display:none; flex-direction:column; }
+  #chat.on { display:flex; }
+  #chat header { flex:none; display:flex; align-items:center; gap:8px;
+                 padding:10px 12px; border-bottom:1px solid #1e2130;
+                 padding-top: max(10px, env(safe-area-inset-top)); }
+  #chat header .name { color:#e8eaf6; font-weight:600; min-width:0;
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #chat header .sub { color:#5b6280; font-size:11px; flex:none;
+                      max-width:40%; white-space:nowrap; overflow:hidden;
+                      text-overflow:ellipsis; }
+  .ts { display:block; text-align:right; font-size:10px; color:#4a5378;
+        margin-top:2px; }
+  #older { margin:10px auto 6px; width:max-content; font-size:12px;
+           color:#5b6280; padding:6px 14px; border:1px solid #1e2130;
+           border-radius:14px; }
+  #chat header button { background:none; border:0;
+                        color:#8a91b0; font-size:18px; padding:4px 8px; }
+  #ctx { margin-left:auto; flex:none; font-size:11px; font-weight:600;
+         padding:3px 9px; border-radius:9px; background:#1a1f30; }
+  #ctxd { flex:none; font-size:11px; color:#5b6280; padding:5px 12px;
+          border-bottom:1px solid #1e2130; }
+  #msgs { flex:1; overflow-y:auto; padding:12px 10px; }
+  .m { max-width:88%; margin:6px 0; padding:9px 12px; border-radius:14px;
+       font-size:15px; line-height:1.55; word-break:break-word;
+       white-space:pre-wrap; }   /* user/tool/think bubbles are raw text —
+                                  keep the newlines the user actually typed */
+  .m.user { margin-left:auto; background:#2a3550; color:#e8eaf6; }
+  .m.pending { opacity:.5; }
+  .m.asst { background:#1a1d2b; color:#cdd0e0; }
+  .m.tool { background:none; color:#5b6280; font-size:12px; padding:2px 12px; }
+  .m.think { background:none; padding:0 4px; font-size:12px; }
+  .m.think summary { color:#4a5378; cursor:pointer; list-style:none; padding:2px 8px; }
+  .m.think summary::before { content:'💭 '; }
+  .m.think div { color:#5b6280; white-space:pre-wrap; padding:4px 8px;
+                 border-left:2px solid #232741; margin:2px 0 6px; }
+  #typing { opacity:.45; padding:4px 14px; }
+  .m.info { background:none; color:#5b6280; text-align:center; }
+  .m pre { background:#0c0d14; border-radius:8px; padding:8px;
+           white-space:pre-wrap; word-break:break-all;
+           font:12px/1.45 ui-monospace,monospace; }
+  .m code { font:13px ui-monospace,monospace; background:#0c0d14;
+            border-radius:4px; padding:0 4px; }
+  .m pre code { background:none; padding:0; }
+  #perm { flex:none; display:none; gap:8px; padding:0 8px 8px; }
+  #perm.on { display:flex; }
+  #perm button { flex:1; border:0; border-radius:12px; padding:12px 0;
+                 font-size:15px; }
+  #perm button:nth-child(1) { background:#2f4a38; color:#a6e3a1; }
+  #perm button:nth-child(2) { background:#2a3550; color:#cdd0e0; }
+  #perm button:nth-child(3) { background:#4a2f36; color:#f38ba8; }
+  #composer { flex:none; display:flex; gap:8px;
+              padding:8px 8px calc(8px + env(safe-area-inset-bottom)); }
+  #composer textarea { flex:1; box-sizing:border-box; min-height:0;
+                       background:#1a1d2b; border:1px solid #2a2f45;
+                       border-radius:12px; color:#e8eaf6;
+                       font-family:inherit; font-size:16px; line-height:1.4;
+                       padding:10px 12px; max-height:120px; resize:none;
+                       overflow-y:auto; }
+  #composer button { flex:none; background:#2a3550; border:0; border-radius:12px;
+                     color:#e8eaf6; padding:0 16px; font-size:15px; }
+  #xwrap { flex:1; min-height:0; padding:4px 2px; overflow-x:auto; }
+  #keys { display:flex; gap:6px; padding:8px 6px calc(8px + env(safe-area-inset-bottom));
+          overflow-x:auto; flex:none; }
+  #keys button { flex:none; min-width:44px; padding:8px 10px; border:0;
+                 border-radius:8px; background:#1e2130; color:#cdd0e0; font-size:15px; }
+  #keys button.armed { background:#f38ba8; color:#11121a; }
+</style></head><body>
+<div id="err" hidden style="color:#f38ba8;padding:24px 4px"></div>
+<div id="ping" style="position:fixed;right:10px;top:calc(6px + env(safe-area-inset-top));
+     font-size:11px;color:#3a4160;z-index:5"></div>
+<div id="list"></div>
+<div id="empty" hidden>no agents running</div>
+<div id="chat"><header><span id="chat-ico"></span><span class="name" id="chat-name"></span>
+  <span class="sub" id="chat-sub"></span>
+  <span id="ctx"></span>
+  <button id="chat-close">✕</button></header>
+  <div id="ctxd" hidden></div>
+  <div id="msgs"></div>
+  <div id="perm">
+    <button data-a="allow">✅ 允许</button>
+    <button data-a="always">✅✅ 不再询问</button>
+    <button data-a="deny">❌ 拒绝</button>
+  </div>
+  <div id="composer"><textarea id="chat-in" rows="1" placeholder="发消息给 agent…"></textarea>
+    <button id="chat-send">发送</button></div>
+</div>
+<div id="term"><div id="xwrap"></div><div id="keys">
+  <button data-k="esc">Esc</button><button data-k="enter">⏎</button>
+  <button data-k="tab">Tab</button>
+  <button data-k="up">↑</button><button data-k="down">↓</button>
+  <button data-k="left">←</button><button data-k="right">→</button>
+  <button data-k="bs">⌫</button><button data-k="int">⌃C</button>
+  <button data-k="ctrl">Ctrl</button>
+  <button data-k="kb" style="background:#2a3550">⌨ 键盘</button>
+  <button data-k="close" style="margin-left:auto">✕</button>
+</div></div>
+<script>
+// xterm (283KB) loads only when a terminal is actually opened — the list
+// and chat views never touch it, so first paint is the inline page only.
+let xtermReady = null;
+function loadXterm() {
+  if (xtermReady) return xtermReady;
+  xtermReady = new Promise((ok, fail) => {
+    let left = 2;
+    const done = () => { if (--left === 0) ok(); };
+    const boom = () => { xtermReady = null; fail(); };
+    const css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = '/assets/xterm.css';
+    const s1 = document.createElement('script'); s1.src = '/assets/xterm.js';
+    const s2 = document.createElement('script'); s2.src = '/assets/fit.js';
+    s1.onload = done; s2.onload = done; s1.onerror = s2.onerror = boom;
+    document.head.appendChild(css);
+    document.head.appendChild(s1);
+    document.head.appendChild(s2);
+  });
+  return xtermReady;
+}
+function setVh() {              // keyboard open/shrink must resize overlays
+  const h = window.visualViewport ? visualViewport.height : innerHeight;
+  document.documentElement.style.setProperty('--vh', h + 'px');
+}
+setVh();
+window.addEventListener('resize', setVh);
+if (window.visualViewport) visualViewport.addEventListener('resize', setVh);
+const token = new URLSearchParams(location.search).get('token') || '';
+const VER = '__VER__';      // replaced at startup; mismatch → hot reload
+function chkVer(v) {        // server redeployed the page — pick it up, but
+  if (v && v !== VER && VER !== '__VER__' &&   // never eat a typed draft
+      !document.getElementById('chat-in').value) location.reload();
+}
+const META = {
+  waiting:    { i:'⏳', c:'#f38ba8', n:0 },
+  running:    { i:'⚡', c:'#f9e2af', n:1 },
+  background: { i:'🌙', c:'#6c7086', n:2 },
+  idle:       { i:'💤', c:'#a6e3a1', n:3 },
+};
+const open = {};
+let lastRowsSig = '';
+let term = null, fit = null, ws = null, ctrlArmed = false;
+
+function setErr(msg) {
+  const e = document.getElementById('err');
+  e.textContent = msg; e.hidden = false;
+  document.getElementById('list').innerHTML = '';
+  document.getElementById('empty').hidden = true;
+}
+function clearErr() { document.getElementById('err').hidden = true; }
+async function tick() {
+  const t0 = performance.now();
+  let res;
+  try { res = await fetch(`/api/status?token=${token}`); }
+  catch { return; }
+  const ms = Math.round(performance.now() - t0);
+  const ping = document.getElementById('ping');
+  ping.textContent = ms + 'ms';
+  ping.style.color = ms < 40 ? '#3a4160' : ms < 120 ? '#f9e2af' : '#f38ba8';
+  if (!res.ok) {
+    setErr(res.status === 403
+      ? 'token 无效 — 重新复制完整 URL(注意 token 别被截断)'
+      : 'server 错误 ' + res.status);
+    return;
+  }
+  clearErr();
+  const d = await res.json();
+  chkVer(d.ver);
+  const rows = d.agents;
+  rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));  // most recently used first
+  const sig = JSON.stringify(rows);
+  if (sig === lastRowsSig) return;        // nothing changed: keep the DOM
+  lastRowsSig = sig;                       // (and the open previews with it)
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  document.getElementById('empty').hidden = rows.length > 0;
+  for (const r of rows) {
+    const m = META[r.status] || { i:'❔', c:'#6c7086', n:2 };
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span class="ico" style="color:${m.c}">${m.i}</span>` +
+      `<div class="rmain"><span class="win">${esc(r.title || r.window)}</span>` +
+      `<div class="rsub">${esc(r.agent)} · ${esc(r.project)}${r.age ? ' · ' + r.age : ''}</div></div>` +
+      `<span class="btns"><span data-a="eye">👁</span><span data-a="tty">⌨</span></span>`;
+    row.onclick = ev => {
+      const a = ev.target.dataset && ev.target.dataset.a;
+      if (a === 'tty') { openTerm(r.pane); return; }
+      if (a === 'eye') { toggle(r.pane, row); return; }
+      openChat(r.pane, r);            // tap the row itself → chat (orca-style)
+    };
+    list.appendChild(row);
+    if (open[r.pane]) attachPreview(r.pane, row);
+  }
+}
+async function toggle(pane, row) {
+  if (open[pane]) { open[pane].remove(); delete open[pane]; return; }
+  await attachPreview(pane, row);
+}
+async function attachPreview(pane, row) {
+  const pre = document.createElement('pre');
+  row.after(pre); open[pane] = pre;
+  try { pre.textContent = await (await fetch(`/api/preview/${pane}?token=${token}`)).text(); }
+  catch { pre.textContent = '(preview failed)'; }
+  return pre;
+}
+
+/* ---- chat view (orca-style: transcript bubbles + composer) ---- */
+let chatPane = null, chatOffset = -1, chatTimer = null, chatPerm = null;
+let chatPinned = true;                     // user at the transcript's bottom?
+let chatHead = -1, chatDone = false;       // oldest loaded byte / exhausted
+const fmtTok = n => n >= 1000 ? Math.round(n / 1000) + 'k' : '' + n;
+function openChat(pane, r) {
+  chatPane = pane; chatOffset = -1;
+  chatHead = -1; chatDone = false; lastUser = { t: '', pu: '' };
+  const m = META[r.status] || { i:'❔', c:'#6c7086' };
+  document.getElementById('chat-ico').textContent = m.i;
+  document.getElementById('chat-ico').style.color = m.c;
+  document.getElementById('chat-name').textContent = r.title || r.window;
+  const sub = document.getElementById('chat-sub');
+  sub.dataset.base = r.project + ' · ' + r.window;   // usage appends to this
+  sub.textContent = sub.dataset.base;
+  document.getElementById('ctx').textContent = '';
+  document.getElementById('ctxd').hidden = true;
+  document.getElementById('msgs').innerHTML = '';
+  document.getElementById('chat').classList.add('on');
+  fitInp();
+  pollChat(true);
+}
+function closeChat() {
+  chatPane = null;
+  document.getElementById('chat').classList.remove('on');
+}
+// keyboard open/shrink: keep the transcript's end right above the composer.
+// iOS also scrolls the page itself for the focused input — undo that.
+if (window.visualViewport) visualViewport.addEventListener('resize', () => {
+  setVh();
+  window.scrollTo(0, 0);
+  if (chatPinned) requestAnimationFrame(() => {
+    const b = document.getElementById('msgs');
+    if (b) b.scrollTop = b.scrollHeight;
+  });
+});
+document.getElementById('msgs').addEventListener('scroll', ev => {
+  const b = ev.target;
+  chatPinned = b.scrollHeight - b.scrollTop - b.clientHeight < 60;
+});
+function ensureOlder() {                    // history pill, top of #msgs
+  const box = document.getElementById('msgs');
+  let b = document.getElementById('older');
+  if (chatDone || chatHead <= 0) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('div'); b.id = 'older';
+    b.textContent = '加载更早 ↑';
+    box.insertBefore(b, box.firstChild);
+  }
+}
+document.getElementById('msgs').addEventListener('click', async ev => {
+  if (ev.target.id !== 'older' || chatHead <= 0) return;
+  const b = ev.target;
+  b.textContent = '加载中…';
+  try {
+    const res = await fetch(`/api/chat/${chatPane}?token=${token}&before=${chatHead}`);
+    if (!res.ok) throw 0;
+    const d = await res.json();
+    const box = document.getElementById('msgs');
+    const oh = box.scrollHeight, ost = box.scrollTop;   // prepend without
+    const frag = document.createDocumentFragment();     // jumping the view
+    for (const m of d.messages) frag.appendChild(mkMsg(m));
+    chatHead = d.head; chatDone = d.done;
+    box.insertBefore(frag, b);            // older messages go above the pill
+    b.remove(); ensureOlder();            // fresh pill if pages remain
+    box.scrollTop = ost + (box.scrollHeight - oh);
+  } catch { b.textContent = '加载失败,再试一次'; }
+});
+let chatBusy = false;                    // one poll in flight — overlapping
+async function pollChat(force) {         // fetches double-append messages
+  if (chatBusy || !chatPane || (!force && !document.getElementById('chat').classList.contains('on'))) return;
+  chatBusy = true;
+  try {
+    let res;
+    try { res = await fetch(`/api/chat/${chatPane}?token=${token}&after=${chatOffset}`); }
+    catch { return; }
+    if (!res.ok) return;
+    const d = await res.json();
+    chkVer(d.ver);
+    chatOffset = d.offset;
+    if (chatHead < 0 && d.head != null) chatHead = d.head;
+    ensureOlder();
+    const box = document.getElementById('msgs');
+    const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    chatPinned = stick;
+    for (const m of d.messages) {
+      if (m.role === 'user') {
+        const pend = [...box.querySelectorAll('.m.pending')]
+          .find(el => el.textContent === m.text);
+        if (pend) { pend.classList.remove('pending'); continue; }  // adopted
+      }
+      addMsg(m);
+    }
+    if (stick) box.scrollTop = box.scrollHeight;
+    chatStatus = d.status;
+    const chip = document.getElementById('ctx');
+    if (d.usage) {                       // TUI footer %, else absolute tokens
+      if (d.usage.pct != null) chip.textContent = d.usage.pct + '%';
+      else if (d.usage.ctx != null) chip.textContent = 'ctx ' + fmtTok(d.usage.ctx);
+      chip.style.color = d.usage.pct >= 85 ? '#f38ba8'
+                       : d.usage.pct >= 50 ? '#f9e2af' : '#a6e3a1';
+      document.getElementById('ctxd').textContent = d.usage.model
+        ? `${d.usage.model} · ctx ${fmtTok(d.usage.ctx ?? 0)} · 输出 ${fmtTok(d.usage.out ?? 0)}`
+        : '';
+    }
+    // typing indicator while the agent is working — with the TUI's live
+    // working line (gerund · elapsed · ↓tokens) when we can read it
+    let typing = document.getElementById('typing');
+    if (d.status === 'running') {
+      if (!typing) { typing = document.createElement('div'); typing.id = 'typing';
+                     typing.className = 'm asst'; }
+      typing.textContent = d.live ? `${d.live.label} · ${d.live.meta}`
+                                  : `… 无新输出 ${d.age ?? '?'}s`;
+      box.appendChild(typing);            // keep it at the end
+    } else if (typing) { typing.remove(); }
+    // live state: permission bar ONLY when a dialog is really on screen
+    const perm = document.getElementById('perm');
+    chatPerm = d.perm;                   // {allow:"1", always:"2", deny:"3"}
+    perm.classList.toggle('on', !!(d.perm && d.perm.allow));
+    const m2 = META[d.status] || { i: '❔', c: '#6c7086' };
+    document.getElementById('chat-ico').textContent = m2.i;
+    document.getElementById('chat-ico').style.color = m2.c;
+  } finally {
+    chatBusy = false;
+  }
+}
+function mkMsg(m) {              // build the bubble; caller appends/scrolls
+  const div = document.createElement('div');
+  div.className = 'm ' + (m.role === 'user' ? 'user' : m.role === 'tool' ? 'tool'
+    : m.role === 'info' ? 'info' : m.role === 'think' ? 'think' : 'asst');
+  if (m.role === 'tool') div.textContent = '⚙ ' + m.text;
+  else if (m.role === 'user' || m.role === 'info') div.textContent = m.text;
+  else if (m.role === 'think') {
+    const d = document.createElement('details');
+    const sm = document.createElement('summary'); sm.textContent = 'thinking…';
+    const tx = document.createElement('div'); tx.textContent = m.text;
+    d.appendChild(sm); d.appendChild(tx); div.appendChild(d);
+  }
+  else div.innerHTML = md(m.text);
+  if (m.ts) {
+    const d = new Date(m.ts);
+    if (!isNaN(d)) {
+      const t = document.createElement('span'); t.className = 'ts';
+      t.textContent = String(d.getHours()).padStart(2,'0') + ':' +
+                      String(d.getMinutes()).padStart(2,'0');
+      div.appendChild(t);
+    }
+  }
+  return div;
+}
+let lastUser = { t: '', pu: '' };  // mid-turn prompts are recorded twice
+function addMsg(m) {               // with the SAME parentUuid — collapse
+  if (m.role === 'user') {         // those, keep real repeats apart
+    if (m.pu && m.pu === lastUser.pu && m.text === lastUser.t) return null;
+    lastUser = { t: m.text, pu: m.pu || '' };
+  }
+  const box = document.getElementById('msgs');
+  const div = mkMsg(m);
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  return div;
+}
+async function sendChat() {
+  const inp = document.getElementById('chat-in');
+  const text = inp.value.trim();
+  if (!text || !chatPane) return;
+  inp.value = '';
+  fitInp();
+  // optimistic echo: show the bubble NOW; the transcript poll adopts it
+  // (and flips it solid) once Claude records the message
+  const echo = addMsg({ role: 'user', ts: '', text });
+  if (echo) echo.classList.add('pending');
+  document.getElementById('chat-ico').textContent = '⚡';
+  document.getElementById('chat-ico').style.color = META.running.c;
+  try {
+    await fetch(`/api/send/${chatPane}?token=${token}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text }) });
+    setTimeout(() => pollChat(true), 250);   // transcript write lands in
+    setTimeout(() => pollChat(true), 900);   // ~100-300ms; catch it fast
+  } catch { alert('发送失败'); }
+}
+// minimal markdown: code fences, inline code, bold, headers, bullets
+function md(s) {
+  s = esc(s).replace(/https?:\/\/[^\s<>"']+/g,
+    u => '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>');
+  const parts = s.split(/```/);
+  for (let i = 0; i < parts.length; i++)
+    if (i % 2) parts[i] = '<pre><code>' + parts[i].replace(/^[a-zA-Z0-9_-]*\n/, '') + '</code></pre>';
+    else {
+      parts[i] = parts[i]
+        .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+        .replace(/^#{1,4} (.*)$/gm, '<b>$1</b>')
+        .replace(/^[-*] /gm, '• ');
+    }
+  return parts.join('').replace(/\n/g, '<br>');
+}
+// tap a code block to copy it
+document.getElementById('msgs').addEventListener('click', ev => {
+  const pre = ev.target.closest('pre');
+  if (!pre || !navigator.clipboard) return;
+  navigator.clipboard.writeText(pre.innerText).then(() => {
+    pre.style.outline = '1px solid #a6e3a1';
+    setTimeout(() => pre.style.outline = '', 400);
+  });
+});
+document.getElementById('chat-close').onclick = closeChat;
+document.getElementById('ctx').onclick = () => {    // tap for model + tokens
+  const d = document.getElementById('ctxd');
+  d.hidden = !d.hidden;
+};
+document.getElementById('chat-send').onclick = sendChat;
+document.getElementById('perm').onclick = async ev => {
+  const a = ev.target.dataset && ev.target.dataset.a;
+  if (!a || !chatPane || !chatPerm) return;
+  const num = chatPerm[a];
+  if (!num) return;
+  try {
+    await fetch(`/api/send/${chatPane}?token=${token}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ key: num }) });       // raw digit, no Enter
+    // next poll re-verifies the bar from the screen
+    setTimeout(() => pollChat(true), 800);
+  } catch { alert('发送失败'); }
+};
+// soft keyboards have no Shift+Enter — there, Enter must insert a newline
+// and sending happens via the button; on pointer devices Enter still sends
+const coarse = matchMedia('(pointer: coarse)').matches;
+document.getElementById('chat-in').addEventListener('keydown', ev => {
+  if (!coarse && ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendChat(); }
+});
+// autosize: reset to auto first so deleting text shrinks the box back;
+// programmatic value changes fire no input event, so call after those too
+function fitInp() {
+  const t = document.getElementById('chat-in');
+  t.style.height = 'auto';
+  t.style.height = Math.min(t.scrollHeight, 120) + 'px';
+}
+document.getElementById('chat-in').addEventListener('input', fitInp);
+let chatStatus = '';
+(function chatLoop() {                     // fast poll while the agent runs,
+  setTimeout(() => {                       // relaxed when idle
+    if (!term) pollChat(false);
+    chatLoop();
+  }, chatStatus === 'running' ? 700 : 2000);
+})();
+
+/* ---- live terminal: pane mirror ---- */
+const KEYNAME = { esc:'Escape', enter:'Enter', tab:'Tab', up:'Up', down:'Down',
+                  left:'Left', right:'Right', bs:'BSpace', int:'C-c' };
+async function openTerm(pane) {
+  try { await loadXterm(); }
+  catch { alert('xterm.js 加载失败'); return; }
+  if (!window.Terminal || !window.FitAddon) { alert('xterm.js 加载失败'); return; }
+  closeTerm();
+  document.getElementById('term').classList.add('on');
+  term = new Terminal({ fontSize: 13, scrollback: 5000, cursorBlink: true,
+                        theme: { background: '#0c0d14' } });
+  fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('xwrap'));
+  fit.fit();                                   // phone drives the geometry
+  term.onData(d => {
+    if (ctrlArmed && d.length === 1) {
+      const c = d.toLowerCase();
+      if (c >= 'a' && c <= 'z') d = String.fromCharCode(c.charCodeAt(0) - 96);
+      ctrlArmed = false; updateCtrl();
+    }
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ text: d }));
+  });
+  const wsPort = parseInt(location.port) + 1;
+  ws = new WebSocket(`ws://${location.hostname}:${wsPort}/api/term/${pane}?token=${token}`);
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = ev => {
+    if (typeof ev.data === 'string') {
+      let c; try { c = JSON.parse(ev.data); } catch { return; }
+      if (c.error) { alert(c.error); closeTerm(); return; }
+      if (c.ready) { sendDims(); return; }
+      // server's effective geometry (fallback = pane-native) is authoritative
+      if (c.cols && term && (term.cols !== c.cols || term.rows !== c.rows))
+        term.resize(c.cols, c.rows);
+      return;
+    }
+    if (term) term.write(new Uint8Array(ev.data));
+  };
+  term.focus();
+}
+function sendDims() {
+  if (ws && ws.readyState === 1 && term)
+    ws.send(JSON.stringify({ cols: term.cols, rows: term.rows }));
+}
+function refit() { if (term && fit) { fit.fit(); sendDims(); } }
+let refitTimer = null;
+const queueRefit = () => { clearTimeout(refitTimer); refitTimer = setTimeout(refit, 250); };
+window.addEventListener('resize', queueRefit);
+if (window.visualViewport) visualViewport.addEventListener('resize', queueRefit);
+function closeTerm() {
+  if (ws) { try { ws.close(); } catch {} ws = null; }
+  if (term) { term.dispose(); term = null; }
+  document.getElementById('term').classList.remove('on');
+}
+function updateCtrl() {
+  document.querySelector('#keys button[data-k=ctrl]').classList.toggle('armed', ctrlArmed);
+}
+document.getElementById('keys').onclick = ev => {
+  const k = ev.target.dataset && ev.target.dataset.k;
+  if (!k) return;
+  if (k === 'close') { closeTerm(); return; }
+  if (k === 'kb') { if (term) term.focus(); return; }
+  if (k === 'ctrl') { ctrlArmed = !ctrlArmed; updateCtrl(); return; }
+  if (KEYNAME[k] && ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ key: KEYNAME[k] }));
+  if (term) term.focus();
+};
+function esc(s) { const d = document.createElement('b'); d.textContent = s||''; return d.innerHTML; }
+setInterval(() => { if (document.visibilityState === 'visible' && !term) tick(); }, 2000);
+document.addEventListener('visibilitychange', () => { if (!term) tick(); });
+tick();
+</script></body></html>"""
+VER = hashlib.md5(PAGE.encode()).hexdigest()[:8]   # page build id
+PAGE = PAGE.replace("__VER__", VER)                # handshake → hot reload
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # phones RST their pooled keep-alive sockets on tab close /
+        # network switch — routine, not worth a traceback in the journal
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"     # keep-alive: one TCP conn for all assets
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        data = body if isinstance(body, bytes) else body.encode()
+        if len(data) > 1024 and "gzip" in self.headers.get("Accept-Encoding", ""):
+            comp = gzip.compress(data, 6)
+            if len(comp) < len(data):
+                data = comp
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        if u.path in ASSETS:
+            ctype, fname = ASSETS[u.path]
+            try:
+                with open(os.path.join(CONF_DIR, "assets", fname), "rb") as f:
+                    data = f.read()
+            except OSError:
+                self._send(404, '{"error":"asset missing"}')
+                return
+            enc = ""
+            if "gzip" in self.headers.get("Accept-Encoding", ""):
+                comp = ASSET_GZ.get(u.path)
+                if comp is None:            # compress once, not per request
+                    comp = gzip.compress(data, 6)
+                    ASSET_GZ[u.path] = comp
+                data, enc = comp, "gzip"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            if enc:
+                self.send_header("Content-Encoding", enc)
+            self.send_header("Cache-Control", "max-age=86400")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if u.path == "/":
+            self._send(200, PAGE, "text/html; charset=utf-8")
+            return
+        if bad_token(u.query):
+            self._send(403, '{"error":"bad token"}')
+            return
+        if u.path == "/api/status":
+            self._send(200, json.dumps({"ts": int(time.time()), "ver": VER,
+                                        "agents": agent_rows()}))
+        elif u.path.startswith("/api/chat/"):
+            m = re.match(r"^/api/chat/(%\d+)$", u.path)
+            pane = m.group(1) if m else ""
+            try:   # one tmux call fetches sid + status + wait together
+                st = subprocess.run(
+                    [TMUX, "display-message", "-p", "-t", pane,
+                     "#{@pane_session_id}|#{@pane_status}|#{@pane_wait_reason}"],
+                    capture_output=True, text=True, errors="replace",
+                    timeout=3,
+                ).stdout.strip()
+                sid, status, wait = (st.split("|") + ["", "", ""])[:3]
+            except Exception:
+                sid, status, wait = "", "", ""
+            path = transcript_path(sid) if sid else None
+            try:
+                after = int(parse_qs(u.query).get("after", ["-1"])[0])
+            except ValueError:
+                after = -1
+            if not path:
+                # info notice only on the first fetch (after=-1); offset 0
+                # keeps later polls from re-appending it every 2s
+                self._send(200, json.dumps({
+                    "offset": 0, "status": status, "wait": wait, "perm": None,
+                    "messages": ([{"role": "info", "ts": "",
+                                   "text": "无对话记录(codex/opencode 或会话未落盘),用 ⌨ 打开终端"}]
+                                  if after == -1 else [])}))
+                return
+            qbefore = parse_qs(u.query).get("before", [""])[0]
+            if qbefore.isdigit():            # one history page, oldest-first
+                head, done, msgs = read_chat_before(path, int(qbefore))
+                self._send(200, json.dumps({"head": head, "done": done,
+                                            "messages": msgs}))
+                return
+            offset, head, msgs = read_chat(path, after)
+            ctx, out = session_usage(path)
+            screen = capture_tail(pane)          # one snapshot, two parsers
+            model, pct = pane_ctx(screen)
+            wlabel, wmeta = pane_live(screen)
+            if not wlabel:                  # working line unreadable (a full-
+                pend = transcript_pending_tool(path)   # screen tool owns the
+                if pend:                    # pane) — the transcript still
+                    name, summ, ts = pend    # names the running tool
+                    el = f"{int(time.time() - ts)}s" if ts else "?"
+                    wlabel = name
+                    wmeta = (summ[:40] + " · " + el) if summ else el
+            try:                                 # transcript silence age —
+                age = int(time.time() - os.path.getmtime(path))
+            except OSError:
+                age = None
+            # permission bar, three-layer gate: pane waiting AND the
+            # transcript ends on an unanswered tool_use AND the screen
+            # really shows numbered options. Screen text alone false-
+            # positives on already-answered dialogs still painted.
+            if status != "waiting" or not transcript_pending_tool(path):
+                perm = None
+            else:
+                perm = detect_perm(pane)
+            self._send(200, json.dumps({"offset": offset, "head": head,
+                                        "messages": msgs,
+                                        "status": status, "wait": wait,
+                                        "perm": perm,
+                                        "usage": {"ctx": ctx, "out": out,
+                                                  "pct": pct, "model": model},
+                                        "live": ({"label": wlabel, "meta": wmeta}
+                                                 if wlabel else None),
+                                        "age": age, "ver": VER}))
+        elif u.path.startswith("/api/preview/"):
+            self._send(200, pane_preview(u.path[len("/api/preview/"):]),
+                       "text/plain; charset=utf-8")
+        else:
+            self._send(404, '{"error":"not found"}')
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        if bad_token(u.query):
+            self._send(403, '{"error":"bad token"}')
+            return
+        m = re.match(r"^/api/send/(%\d+)$", u.path)
+        if not m or not pane_geometry(m.group(1)):
+            self._send(404, '{"error":"pane gone"}')
+            return
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        if not 0 < n <= 65536:       # cap: a bogus Content-Length must not
+            self._send(413, '{"error":"too large"}')   # hang a keep-alive
+            self.close_connection = True               # thread on a read
+            return
+        try:
+            body = json.loads(self.rfile.read(n))
+            text = body.get("text")
+        except Exception:
+            body, text = {}, None
+        if isinstance(text, str) and 0 < len(text) <= 4000:
+            subprocess.run([TMUX, "send-keys", "-t", m.group(1), "-l", text],
+                           capture_output=True, timeout=3)
+            subprocess.run([TMUX, "send-keys", "-t", m.group(1), "Enter"],
+                           capture_output=True, timeout=3)
+            self._send(200, '{"ok":true}')
+        else:
+            # {"key": "1"} — a single raw keypress, no Enter (dialogs select
+            # on the digit itself; appending Enter would leak into the input)
+            key = body.get("key") if isinstance(body, dict) else None
+            if isinstance(key, str) and re.match(r"^[1-9a-zA-Z]$", key):
+                subprocess.run([TMUX, "send-keys", "-t", m.group(1), key],
+                               capture_output=True, timeout=3)
+                self._send(200, '{"ok":true}')
+            else:
+                self._send(400, '{"error":"bad text"}')
+
+
+def lan_ips():
+    # pick real NICs + ZeroTier by interface NAME — range filters can't tell
+    # libvirt (192.168.122.1) from a home LAN, and dropping 172.* kills
+    # ZeroTier (172.23.x) along with docker (172.17.x).
+    try:
+        out = subprocess.run(["ip", "-brief", "addr"], capture_output=True,
+                             text=True, timeout=2).stdout
+    except Exception:
+        out = ""
+    keep = re.compile(r"^(en|eth|wl|zt)")
+    ips = []
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) >= 3 and keep.match(f[0]):
+            for a in f[2:]:
+                if "." in a and not a.startswith(("127.", "169.254.")):
+                    ips.append(a.split("/")[0])
+    return ips or ["127.0.0.1"]
+
+
+async def ws_main(bind, port):
+    async with websockets.serve(term_handler, bind, port, max_size=None,
+                                ping_interval=20, ping_timeout=20):
+        await asyncio.Future()
+
+
+def main():
+    global TOKEN
+    ap = argparse.ArgumentParser(description="mobile agent status + terminal")
+    ap.add_argument("--port", type=int, default=7678)
+    ap.add_argument("--bind", default="0.0.0.0")
+    args = ap.parse_args()
+    TOKEN = load_token()
+    ensure_assets()
+    for f in glob.glob("/tmp/agent-server-*.fifo"):   # SIGKILL leftovers
+        try:
+            os.unlink(f)
+        except OSError:
+            pass
+
+    httpd = Server((args.bind, args.port), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print(f"agent-server http on {args.bind}:{args.port}, ws on {args.bind}:{args.port + 1}", flush=True)
+    for ip in lan_ips():
+        print(f"phone URL: http://{ip}:{args.port}/?token={TOKEN}", flush=True)
+    asyncio.run(ws_main(args.bind, args.port + 1))
+
+
+if __name__ == "__main__":
+    main()
