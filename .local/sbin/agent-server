@@ -481,7 +481,10 @@ def perm_gate(screen, status, path, pane):
     waiting+pending path stays as the fallback for marker-less dialogs."""
     bottom = "\n".join(screen.splitlines()[-10:])
     opts = parse_opts(bottom)
-    marker = re.search(r"enter to confirm|y to continue", bottom, re.I)
+    # confirm-hint markers seen on real dialogs: notice types end with
+    # 'Enter to confirm', tool permission ends with 'Esc to cancel'
+    marker = re.search(r"enter to confirm|y to continue|esc to cancel", bottom,
+                       re.I)
     if opts and marker and opts.get("allow"):
         return opts
     if (re.search(r"\by to (continue|proceed|accept)", bottom, re.I)
