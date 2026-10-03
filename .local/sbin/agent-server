@@ -139,9 +139,11 @@ def session_title(sid):
     return title
 
 
-USAGE_CACHE = {}   # path -> ((size, mtime_ns), ctx, out) — the chat poll
-                    # hits this every 700ms; skip the tail read when the
-                    # transcript has not changed
+PMODE_MAP = {"default": "manual", "acceptEdits": "accept edits",
+             "plan": "plan", "auto": "auto", "bypassPermissions": "bypass"}
+USAGE_CACHE = {}   # path -> ((size, mtime_ns), ctx, out, pmode) — the chat
+                   # poll hits this every 700ms; skip the tail read when the
+                   # transcript has not changed
 
 
 def session_usage(path):
@@ -154,27 +156,32 @@ def session_usage(path):
     sig = (st.st_size, st.st_mtime_ns)
     hit = USAGE_CACHE.get(path)
     if hit and hit[0] == sig:
-        return hit[1], hit[2]
-    ctx = out = None
+        return hit[1], hit[2], hit[3]
+    ctx = out = pmode = None
     try:
         with open(path, "rb") as fh:
             fh.seek(max(0, st.st_size - 65536))
             tail = fh.read().decode(errors="replace")
         for line in reversed(tail.splitlines()):
             try:
-                u = json.loads(line).get("message", {}).get("usage")
+                e = json.loads(line)
             except ValueError:
                 continue
-            if u and u.get("input_tokens") is not None:
-                ctx = (u.get("input_tokens", 0)
-                       + u.get("cache_read_input_tokens", 0)
-                       + u.get("cache_creation_input_tokens", 0))
-                out = u.get("output_tokens", 0)
+            if pmode is None and e.get("permissionMode"):
+                pmode = PMODE_MAP.get(e["permissionMode"], e["permissionMode"])
+            if ctx is None:
+                u = (e.get("message") or {}).get("usage")
+                if u and u.get("input_tokens") is not None:
+                    ctx = (u.get("input_tokens", 0)
+                           + u.get("cache_read_input_tokens", 0)
+                           + u.get("cache_creation_input_tokens", 0))
+                    out = u.get("output_tokens", 0)
+            if ctx is not None and pmode is not None:
                 break
     except OSError:
         pass
-    USAGE_CACHE[path] = (sig, ctx, out)
-    return ctx, out
+    USAGE_CACHE[path] = (sig, ctx, out, pmode)
+    return ctx, out, pmode
 
 
 def agent_rows():
@@ -366,7 +373,7 @@ def read_chat_before(path, before, window=262144):
 
 
 # keys the phone may send as {"key": ...} — tmux key names only, no shell
-KEY_WHITELIST = {"Enter", "Escape", "Tab", "BSpace", "Up", "Down", "Left", "Right", "C-c"}
+KEY_WHITELIST = {"Enter", "Escape", "Tab", "BTab", "BSpace", "Up", "Down", "Left", "Right", "C-c"}
 
 
 def transcript_pending_tool(path):
@@ -486,6 +493,26 @@ def pane_live(text):
         if m:
             return m.group(1), m.group(2).replace(" tokens", "")
     return None, None
+
+
+MODE_NAMES = {                        # normalized TUI phrase -> chip label
+    "auto": "auto", "accept edits": "accept edits", "plan": "plan",
+    "manual": "manual", "bypass": "bypass", "bypass permissions": "bypass",
+}
+
+
+def pane_mode(text):
+    """Permission mode from the TUI's bottom hint line. The line is
+    glyph-prefixed ('⏵⏵ auto mode on (shift+tab …)' / '⏸ manual mode on · …')
+    — manual mode OMITS the (shift+tab) suffix, so anchor on the glyph and
+    the terminator. Whitelist-mapped so stray text can't pose as a mode."""
+    for line in text.splitlines():
+        m = re.search(r"[⏵⏸]+\s*([a-z][a-z ]+?)\s*(?:\(|·)", line)
+        if m:
+            p = m.group(1).strip().lower()
+            p = p.replace(" mode", "").replace(" on", "").strip()
+            return MODE_NAMES.get(p)
+    return None
 
 
 def resize_pane(pane, cols, rows):
@@ -1079,9 +1106,11 @@ async function pollChat(force) {         // fetches double-append messages
       else if (d.usage.ctx != null) chip.textContent = 'ctx ' + fmtTok(d.usage.ctx);
       chip.style.color = d.usage.pct >= 85 ? '#f38ba8'
                        : d.usage.pct >= 50 ? '#f9e2af' : '#a6e3a1';
-      document.getElementById('ctxd').textContent = d.usage.model
-        ? `${d.usage.model} · ctx ${fmtTok(d.usage.ctx ?? 0)} · 输出 ${fmtTok(d.usage.out ?? 0)}`
-        : '';
+      document.getElementById('modec').textContent =
+        '⇄ ' + (d.usage.mode || '—');
+      document.getElementById('ctxd').textContent =
+        [d.usage.model, `ctx ${fmtTok(d.usage.ctx ?? 0)}`,
+         `输出 ${fmtTok(d.usage.out ?? 0)}`].filter(Boolean).join(' · ');
     }
     // typing indicator while the agent is working — with the TUI's live
     // working line (gerund · elapsed · ↓tokens) when we can read it
@@ -1198,6 +1227,17 @@ document.getElementById('cmds').onclick = ev => {   // one-tap slash commands
   if (!c || !chatPane) return;
   document.getElementById('chat-in').value = c;
   sendChat();
+};
+document.getElementById('modec').onclick = async () => {  // shift+tab cycle
+  if (!chatPane) return;
+  try {
+    await fetch(`/api/send/${chatPane}?token=${token}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'BTab' }) });
+    // staggered re-polls: the TUI redraws within ~100ms — first probe
+    // that catches it updates the chip, no fixed-wait lag
+    [150, 400, 900].forEach(ms => setTimeout(() => pollChat(true), ms));
+  } catch { alert('切换失败'); }
 };
 document.getElementById('chat-send').onclick = sendChat;
 document.getElementById('perm').onclick = async ev => {
@@ -1422,10 +1462,13 @@ class Handler(BaseHTTPRequestHandler):
                                             "messages": msgs}))
                 return
             offset, head, msgs = read_chat(path, after)
-            ctx, out = session_usage(path)
+            ctx, out, tmode = session_usage(path)
             screen = capture_tail(pane)          # one snapshot, two parsers
             model, pct = pane_ctx(screen)
             wlabel, wmeta = pane_live(screen)
+            # live screen first; while the agent runs the TUI hint line is
+            # covered, so fall back to the turn's structured permissionMode
+            pmode = pane_mode(screen) or tmode
             if not wlabel:                  # working line unreadable (a full-
                 pend = transcript_pending_tool(path)   # screen tool owns the
                 if pend:                    # pane) — the transcript still
@@ -1489,7 +1532,8 @@ class Handler(BaseHTTPRequestHandler):
             # {"key": "1"} — a single raw keypress, no Enter (dialogs select
             # on the digit itself; appending Enter would leak into the input)
             key = body.get("key") if isinstance(body, dict) else None
-            if isinstance(key, str) and re.match(r"^[1-9a-zA-Z]$", key):
+            if isinstance(key, str) and (re.match(r"^[1-9a-zA-Z]$", key)
+                                         or key in KEY_WHITELIST):
                 subprocess.run([TMUX, "send-keys", "-t", m.group(1), key],
                                capture_output=True, timeout=3)
                 self._send(200, '{"ok":true}')
