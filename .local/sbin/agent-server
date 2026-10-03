@@ -880,7 +880,8 @@ function diffAlerts(rows) {
   // jumping to a waiting agent IS handling it, don't nag about yourself
   waitRows = rows.filter(r => r.status === 'waiting' && r.pane !== chatPane);
   const bar = document.getElementById('wbar');   // the one mobile-visible
-  bar.hidden = !waitRows.length;                 // layer-1 signal
+  bar.hidden = !waitRows.length                  // layer-1 signal; hidden
+             || document.getElementById('term').classList.contains('on');
   if (waitRows.length) {
     const w = waitRows[0];
     bar.textContent = `⏳ ${w.title || w.window} 等待授权` +
@@ -962,7 +963,13 @@ let chatPane = null, chatOffset = -1, chatTimer = null, chatPerm = null;
 let chatPinned = true;                     // user at the transcript's bottom?
 let chatHead = -1, chatDone = false;       // oldest loaded byte / exhausted
 const fmtTok = n => n >= 1000 ? Math.round(n / 1000) + 'k' : '' + n;
+const drafts = {};                     // per-pane half-typed prompts —
+function saveDraft() {                 // switching agents must never carry
+  if (chatPane)                        // text into the wrong chat
+    drafts[chatPane] = document.getElementById('chat-in').value;
+}
 function openChat(pane, r) {
+  saveDraft();
   chatPane = pane; chatOffset = -1;
   chatHead = -1; chatDone = false; lastUser = { t: '', pu: '' };
   const m = META[r.status] || { i:'❔', c:'#6c7086' };
@@ -974,12 +981,14 @@ function openChat(pane, r) {
   sub.textContent = sub.dataset.base;
   document.getElementById('ctx').textContent = '';
   document.getElementById('ctxd').hidden = true;
+  document.getElementById('chat-in').value = drafts[pane] || '';
   document.getElementById('msgs').innerHTML = '';
   document.getElementById('chat').classList.add('on');
   fitInp();
   pollChat(true);
 }
 function closeChat() {
+  saveDraft();
   chatPane = null;
   document.getElementById('chat').classList.remove('on');
 }
@@ -1125,6 +1134,7 @@ async function sendChat() {
   if (!text || !chatPane) return;
   inp.value = '';
   fitInp();
+  delete drafts[chatPane];
   // optimistic echo: show the bubble NOW; the transcript poll adopts it
   // (and flips it solid) once Claude records the message
   const echo = addMsg({ role: 'user', ts: '', text });
@@ -1209,8 +1219,8 @@ let chatStatus = '';
 const KEYNAME = { esc:'Escape', enter:'Enter', tab:'Tab', up:'Up', down:'Down',
                   left:'Left', right:'Right', bs:'BSpace', int:'C-c' };
 async function openTerm(pane) {
-  document.getElementById('wbar').hidden = true;   // status polling pauses
-  try { await loadXterm(); }                       // here — stale pill would
+  document.getElementById('wbar').hidden = true;   // the term view owns the
+  try { await loadXterm(); }                       // screen while it is open
   catch { alert('xterm.js 加载失败'); return; }
   if (!window.Terminal || !window.FitAddon) { alert('xterm.js 加载失败'); return; }
   closeTerm();
@@ -1274,8 +1284,9 @@ document.getElementById('keys').onclick = ev => {
   if (term) term.focus();
 };
 function esc(s) { const d = document.createElement('b'); d.textContent = s||''; return d.innerHTML; }
-setInterval(() => { if (!term) tick(); }, 2000);  // keep polling in background
-// tabs too (throttled by the browser) so the title badge stays live
+setInterval(tick, 2000);   // poll everywhere incl. term view — the version
+// handshake rides on tick, and a page stuck in an overlay view must still
+// be able to hot-reload after a deploy
 document.addEventListener('visibilitychange', () => { if (!term) tick(); });
 tick();
 </script></body></html>"""
