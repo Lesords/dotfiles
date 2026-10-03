@@ -422,6 +422,28 @@ def transcript_pending_tool(path):
     return None
 
 
+def parse_opts(text):
+    """Numbered dialog options in the given text, classified two-pass:
+    always/deny from the bottom up, allow as the lowest unclaimed yes."""
+    cands = []
+    for line in text.splitlines():
+        m = re.match(r"\s*[❯> ]?\s*([1-9])[.)]\s*(.+?)\s*$", line)
+        if m:
+            cands.append((m.group(1), m.group(2).lower()))
+    opts = {}
+    for num, txt in reversed(cands):   # bottom-most wins: the live dialog
+        if re.search(r"don'?t|do not|always|不再", txt):   # sits below any
+            opts.setdefault("always", num)                 # numbered list
+        elif re.match(r"^(no|deny|skip|cancel|not now|拒绝)", txt):  # in
+            opts.setdefault("deny", num)                   # transcript
+    for num, txt in cands:             # allow: LOWEST number whose line is
+        if (num != opts.get("always") and num != opts.get("deny")   # a plain
+                and re.match(r"^(yes|allow|proceed|approve|允许)", txt)):
+            opts.setdefault("allow", num)   # yes — a phrasing variant on a
+            break                           # higher option must not steal it
+    return opts
+
+
 def detect_perm(pane):
     """Parse the LIVE screen for a permission dialog (ground truth — the
     @pane_wait_reason latch can be stale in both directions).
@@ -438,20 +460,36 @@ def detect_perm(pane):
         ).stdout
     except Exception:
         return None
-    opts = {}
-    for line in reversed(out.splitlines()):   # bottom-up: the live dialog is
-        m = re.match(r"\s*[❯> ]?\s*([1-9])[.)]\s*(.+?)\s*$", line)  # at the
-        if not m:                              # bottom; a numbered list in
-            continue                           # the transcript above must
-                                               # not steal its digits
-        num, txt = m.group(1), m.group(2).lower()
-        if re.search(r"don'?t ask|always|不再", txt):
-            opts.setdefault("always", num)
-        elif re.match(r"^(yes|allow|proceed|approve|允许)", txt):
-            opts.setdefault("allow", num)
-        elif re.match(r"^(no|deny|skip|cancel|拒绝)", txt):
-            opts.setdefault("deny", num)
-    return opts if len(opts) >= 2 else None
+    opts = parse_opts(out)
+    if len(opts) >= 2:
+        return opts
+    # y/n banner ("y to continue · n to cancel") — the auto-mode billing
+    # notice on gateway setups: sets waiting but has NO numbered options
+    if (re.search(r"\by to (continue|proceed|accept)", out, re.I)
+            and re.search(r"\bn to (cancel|deny|skip|stop)", out, re.I)):
+        return {"allow": "y", "deny": "n"}
+    return None
+
+
+def perm_gate(screen, status, path, pane):
+    """Permission bar decision. A LIVE dialog is pinned to the screen
+    bottom: options plus a confirm hint ('Enter to confirm' / 'y to
+    continue') within the last few lines. Detecting it there — from the
+    capture every poll already takes — shows the bar immediately, without
+    waiting for the @pane_status latch (hook-driven and may lag seconds).
+    Answered dialogs scroll up and out of that window; the old
+    waiting+pending path stays as the fallback for marker-less dialogs."""
+    bottom = "\n".join(screen.splitlines()[-10:])
+    opts = parse_opts(bottom)
+    marker = re.search(r"enter to confirm|y to continue", bottom, re.I)
+    if opts and marker and opts.get("allow"):
+        return opts
+    if (re.search(r"\by to (continue|proceed|accept)", bottom, re.I)
+            and re.search(r"\bn to (cancel|deny|skip|stop)", bottom, re.I)):
+        return {"allow": "y", "deny": "n"}
+    if status == "waiting":
+        return detect_perm(pane)      # legacy: status latch + own capture
+    return None
 
 
 def capture_tail(pane, lines=24):   # wide enough that a multi-line draft
@@ -1126,6 +1164,8 @@ async function pollChat(force) {         // fetches double-append messages
     const perm = document.getElementById('perm');
     chatPerm = d.perm;                   // {allow:"1", always:"2", deny:"3"}
     perm.classList.toggle('on', !!(d.perm && d.perm.allow));
+    for (const b of perm.querySelectorAll('button'))   // y/n banners have
+      b.style.display = d.perm && d.perm[b.dataset.a] ? '' : 'none';
     const m2 = META[d.status] || { i: '❔', c: '#6c7086' };
     document.getElementById('chat-ico').textContent = m2.i;
     document.getElementById('chat-ico').style.color = m2.c;
@@ -1488,12 +1528,14 @@ class Handler(BaseHTTPRequestHandler):
                 perm = None
             else:
                 perm = detect_perm(pane)
+            perm = perm_gate(screen, status, path, pane) or perm
             self._send(200, json.dumps({"offset": offset, "head": head,
                                         "messages": msgs,
                                         "status": status, "wait": wait,
                                         "perm": perm,
                                         "usage": {"ctx": ctx, "out": out,
-                                                  "pct": pct, "model": model},
+                                                  "pct": pct, "model": model,
+                                                  "mode": pmode},
                                         "live": ({"label": wlabel, "meta": wmeta}
                                                  if wlabel else None),
                                         "age": age, "ver": VER}))
