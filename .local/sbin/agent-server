@@ -288,6 +288,9 @@ def parse_msgs(lines):
         if e.get("isSidechain"):
             continue
         etype, ts = e.get("type"), e.get("timestamp", "")
+        if etype == "user" and e.get("isMeta"):
+            continue               # local-command OUTPUT panels (/context,
+            # /compact stdout) — machine-injected, not a user message
         content = (e.get("message") or {}).get("content")
         if etype == "user" and isinstance(content, str):
             content = [{"type": "text", "text": content}]
@@ -731,6 +734,13 @@ PAGE = r"""<!doctype html>
   #perm button:nth-child(1) { background:#2f4a38; color:#a6e3a1; }
   #perm button:nth-child(2) { background:#2a3550; color:#cdd0e0; }
   #perm button:nth-child(3) { background:#4a2f36; color:#f38ba8; }
+  #cmds { flex:none; display:flex; gap:6px; padding:0 8px 6px;
+          overflow-x:auto; }
+  #cmds span { flex:none; font-size:12px; color:#8a91b0; padding:5px 12px;
+               border:1px solid #2a2f45; border-radius:12px; }
+  .m.cmd { margin:6px auto; max-width:none; background:none; color:#5b6280;
+           font-size:12px; border:1px solid #1e2130; border-radius:12px;
+           padding:4px 12px; white-space:normal; }
   #composer { flex:none; display:flex; gap:8px;
               padding:8px 8px calc(8px + env(safe-area-inset-bottom)); }
   #composer textarea { flex:1; box-sizing:border-box; min-height:0;
@@ -772,6 +782,8 @@ PAGE = r"""<!doctype html>
     <button data-a="always">✅✅ 不再询问</button>
     <button data-a="deny">❌ 拒绝</button>
   </div>
+  <div id="cmds"><span id="modec">⇄ mode</span>
+    <span data-c="/compact">⌘ compact</span></div>
   <div id="composer"><textarea id="chat-in" rows="1" placeholder="发消息给 agent…"></textarea>
     <button id="chat-send">发送</button></div>
 </div>
@@ -1096,6 +1108,8 @@ function mkMsg(m) {              // build the bubble; caller appends/scrolls
   const div = document.createElement('div');
   div.className = 'm ' + (m.role === 'user' ? 'user' : m.role === 'tool' ? 'tool'
     : m.role === 'info' ? 'info' : m.role === 'think' ? 'think' : 'asst');
+  if (m.role === 'user' && m.text[0] === '/')   // slash command: a centered
+    div.className = 'm cmd';                    // chip, not a right bubble
   if (m.role === 'tool') div.textContent = '⚙ ' + m.text;
   else if (m.role === 'user' || m.role === 'info') div.textContent = m.text;
   else if (m.role === 'think') {
@@ -1178,6 +1192,12 @@ document.getElementById('chat-close').onclick = closeChat;
 document.getElementById('ctx').onclick = () => {    // tap for model + tokens
   const d = document.getElementById('ctxd');
   d.hidden = !d.hidden;
+};
+document.getElementById('cmds').onclick = ev => {   // one-tap slash commands
+  const c = ev.target.dataset && ev.target.dataset.c;
+  if (!c || !chatPane) return;
+  document.getElementById('chat-in').value = c;
+  sendChat();
 };
 document.getElementById('chat-send').onclick = sendChat;
 document.getElementById('perm').onclick = async ev => {
