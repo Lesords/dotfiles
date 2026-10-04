@@ -830,23 +830,29 @@ PAGE = r"""<!doctype html>
   #perm button:nth-child(1) { background:#2f4a38; color:#a6e3a1; }
   #perm button:nth-child(2) { background:#2a3550; color:#cdd0e0; }
   #perm button:nth-child(3) { background:#4a2f36; color:#f38ba8; }
-  #cmds { flex:none; display:flex; gap:6px; padding:0 8px 6px;
-          overflow-x:auto; }
+  #cmds { display:flex; align-items:center; gap:6px; padding:0 2px; }
   #cmds span { flex:none; font-size:12px; color:#8a91b0; padding:5px 12px;
                border:1px solid #2a2f45; border-radius:12px; }
   .m.cmd { margin:6px auto; max-width:none; background:none; color:#5b6280;
            font-size:12px; border:1px solid #1e2130; border-radius:12px;
            padding:4px 12px; white-space:normal; }
-  #composer { flex:none; display:flex; gap:8px;
+  #composer { flex:none;
               padding:8px 8px calc(8px + env(safe-area-inset-bottom)); }
-  #composer textarea { flex:1; box-sizing:border-box; min-height:0;
-                       background:#1a1d2b; border:1px solid #2a2f45;
-                       border-radius:12px; color:#e8eaf6;
+  #cbox { display:flex; flex-direction:column; gap:2px;   /* one box: the
+          input line and the action row live inside it */ background:#1a1d2b;
+          border:1px solid #2a2f45; border-radius:14px; padding:6px; }
+  #composer textarea { box-sizing:border-box; min-height:0; width:100%;
+                       background:none; border:0;
+                       color:#e8eaf6;
                        font-family:inherit; font-size:16px; line-height:1.4;
-                       padding:10px 12px; max-height:120px; resize:none;
-                       overflow-y:auto; }
-  #composer button { flex:none; background:#2a3550; border:0; border-radius:12px;
-                     color:#e8eaf6; padding:0 16px; font-size:15px; }
+                       padding:6px 8px; max-height:120px; resize:none;
+                       overflow-y:auto; scrollbar-width:none; }
+  #composer textarea:focus { outline:none; }   /* no focus ring */
+  #composer textarea::-webkit-scrollbar { display:none; }  /* nor a bar —
+                                                           touch-scroll stays */
+  #composer button { flex:none; margin-left:auto; background:#2a3550; border:0;
+                     border-radius:12px; color:#e8eaf6; padding:5px 18px;
+                     font-size:13px; }
   #xwrap { flex:1; min-height:0; padding:4px 2px; overflow-x:auto; }
   #keys { display:flex; gap:6px; padding:8px 6px calc(8px + env(safe-area-inset-bottom));
           overflow-x:auto; flex:none; }
@@ -878,10 +884,10 @@ PAGE = r"""<!doctype html>
     <button data-a="always">✅✅ 不再询问</button>
     <button data-a="deny">❌ 拒绝</button>
   </div>
-  <div id="cmds"><span id="modec">⇄ mode</span>
-    <span data-c="/compact">⌘ compact</span></div>
-  <div id="composer"><textarea id="chat-in" rows="1" placeholder="发消息给 agent…"></textarea>
-    <button id="chat-send">发送</button></div>
+  <div id="composer"><div id="cbox"><textarea id="chat-in" rows="1" placeholder="发消息给 agent…"></textarea>
+    <div id="cmds"><span id="modec">⇄ mode</span>
+      <span data-c="/compact">⌘ compact</span>
+      <button id="chat-send">发送</button></div></div></div>
 </div>
 <div id="term"><div id="xwrap"></div><div id="keys">
   <button data-k="esc">Esc</button><button data-k="enter">⏎</button>
