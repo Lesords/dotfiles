@@ -776,6 +776,8 @@ PAGE = r"""<!doctype html>
                       text-overflow:ellipsis; }
   .ts { display:block; text-align:right; font-size:10px; color:#4a5378;
         margin-top:2px; }
+  .m.think .ts { padding-right:8px; }    /* bubble-less rows pad 4px/0 — */
+  .m.compact .ts { padding-right:12px; } /* keep every ts 12px from the edge */
   #older { margin:10px auto 6px; width:max-content; font-size:12px;
            color:#5b6280; padding:6px 14px; border:1px solid #1e2130;
            border-radius:14px; }
@@ -790,11 +792,13 @@ PAGE = r"""<!doctype html>
        font-size:15px; line-height:1.55; word-break:break-word;
        white-space:pre-wrap; }   /* user/tool/think bubbles are raw text —
                                   keep the newlines the user actually typed */
-  .m.user { margin-left:auto; background:#2a3550; color:#e8eaf6; }
+  .m.user { margin-left:auto; background:#2a3550; color:#e8eaf6;
+            max-width:80%; }   /* prompts are short; give output the room */
   .m.pending { opacity:.5; }
-  .m.asst { background:#1a1d2b; color:#cdd0e0; }
-  .m.tool { background:none; color:#5b6280; font-size:12px; padding:2px 12px; }
-  .m.think { background:none; padding:0 4px; font-size:12px; }
+  .m.asst { background:#1a1d2b; color:#cdd0e0; max-width:100%; }
+  .m.tool { background:none; color:#5b6280; font-size:12px; padding:2px 12px;
+            max-width:100%; }
+  .m.think { background:none; padding:0 4px; font-size:12px; max-width:100%; }
   .m.think summary { color:#4a5378; cursor:pointer; list-style:none; padding:2px 8px; }
   .m.think summary::before { content:'💭 '; }
   .m.think div { color:#5b6280; white-space:pre-wrap; padding:4px 8px;
@@ -812,6 +816,8 @@ PAGE = r"""<!doctype html>
   #typing { opacity:.45; padding:4px 14px; }
   .m.info { background:none; color:#5b6280; text-align:center; }
   .m pre { background:#0c0d14; border-radius:8px; padding:8px;
+           width:fit-content; max-width:100%;   /* bg hugs the longest line,
+           not the bubble — no dark slab past short code */
            white-space:pre-wrap; word-break:break-all;
            font:12px/1.45 ui-monospace,monospace; }
   .m code { font:13px ui-monospace,monospace; background:#0c0d14;
