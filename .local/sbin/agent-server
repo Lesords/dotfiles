@@ -310,7 +310,13 @@ def parse_msgs(lines):
                 t = b.get("text", "").strip()
                 if not t:
                     continue
+                if e.get("isCompactSummary"):   # /compact's landing summary —
+                    msgs.append({"role": "compact", "ts": ts, "text": t})
+                    continue                    # its own card, not a user bubble
                 mc = re.match(r"<command-name>(.*?)</command-name>", t)
+                if mc and mc.group(1) == "/compact":
+                    continue   # wrapper echo lands AFTER the summary card; the
+                # raw "/compact" prompt record before it is the trigger chip
                 if mc:                  # slash command run in the TUI
                     msgs.append({"role": "user", "ts": ts, "text": mc.group(1)})
                 elif not t.startswith(("<local-command", "<task-notification",
@@ -528,9 +534,15 @@ def pane_live(text):
     '<spinner> <Gerund>… (2m 9s · ↓ 7.4k tokens)'. The transcript only lands
     per completed message, so this screen line is the only live progress.
     The leading glyph is an animated spinner (✶/·/…), so anchor on the
-    '… (… · ↓ … tokens)' signature instead of the glyph."""
+    '… (… · ↓ … tokens)' signature instead of the glyph. /compact paints
+    'Compacting conversation… (2s)' — its tokens suffix arrives only once
+    the summary starts streaming — so that phase gets its own label; the
+    ↑ direction covers the SessionStart-hook line after a compact."""
     for line in text.splitlines():
-        m = re.search(r"(\S+)… \(([^()]*· ↓ [^()]*tokens)\)", line)
+        m = re.search(r"Compacting conversation… \(([^()]*)\)", line)
+        if m:
+            return "compacting", m.group(1).replace(" tokens", "")
+        m = re.search(r"(\S+)… \(([^()]*· [↓↑] [^()]*tokens)\)", line)
         if m:
             return m.group(1), m.group(2).replace(" tokens", "")
     return None, None
@@ -787,6 +799,16 @@ PAGE = r"""<!doctype html>
   .m.think summary::before { content:'💭 '; }
   .m.think div { color:#5b6280; white-space:pre-wrap; padding:4px 8px;
                  border-left:2px solid #232741; margin:2px 0 6px; }
+  .m.compact { margin:8px auto; max-width:none; background:none; padding:0; }
+  .m.compact summary { color:#4a5378; cursor:pointer; list-style:none;
+                       padding:3px 10px; }
+  .m.compact summary::before { content:'⌛ '; }
+  .m.compact > details > div { max-height:45vh; overflow-y:auto; }
+  .m.compact .sec { border-top:1px solid #1e2130; }
+  .m.compact .sec summary { color:#7c86ad; font-size:12px; padding:4px 10px; }
+  .m.compact .sec summary::before { content:'▸ '; }
+  .m.compact .sec[open] summary::before { content:'▾ '; }
+  .m.compact .sec > div { color:#5b6280; font-size:12px; padding:2px 10px 8px; }
   #typing { opacity:.45; padding:4px 14px; }
   .m.info { background:none; color:#5b6280; text-align:center; }
   .m pre { background:#0c0d14; border-radius:8px; padding:8px;
@@ -1137,7 +1159,10 @@ async function pollChat(force) {         // fetches double-append messages
           .find(el => el.textContent === m.text);
         if (pend) { pend.classList.remove('pending'); continue; }  // adopted
       }
-      addMsg(m);
+      if (m.role === 'compact')          // the card adopts the pending
+        for (const el of                 // /compact chip; the chip itself
+          box.querySelectorAll('.m.pending.cmd')) el.remove();   // is filtered
+      addMsg(m);                         // server-side
     }
     if (stick) box.scrollTop = box.scrollHeight;
     chatStatus = d.status;
@@ -1154,13 +1179,18 @@ async function pollChat(force) {         // fetches double-append messages
          `输出 ${fmtTok(d.usage.out ?? 0)}`].filter(Boolean).join(' · ');
     }
     // typing indicator while the agent is working — with the TUI's live
-    // working line (gerund · elapsed · ↓tokens) when we can read it
+    // working line (gerund · elapsed · ↓tokens) when we can read it.
+    // /compact never flips @pane_status (no UserPromptSubmit fires for
+    // it), so a live screen line must show even while the status is
+    // idle; waiting keeps its own UI (perm bar), no typing bubble there
     let typing = document.getElementById('typing');
-    if (d.status === 'running') {
+    if (d.status === 'running' || (d.live && d.status !== 'waiting')) {
       if (!typing) { typing = document.createElement('div'); typing.id = 'typing';
                      typing.className = 'm asst'; }
-      typing.textContent = d.live ? `${d.live.label} · ${d.live.meta}`
-                                  : `… 无新输出 ${d.age ?? '?'}s`;
+      const lab = d.live && d.live.label === 'compacting'
+                ? '⌛ compact' : d.live && d.live.label;
+      typing.textContent = lab ? `${lab} · ${d.live.meta}`
+                               : `… 无新输出 ${d.age ?? '?'}s`;
       box.appendChild(typing);            // keep it at the end
     } else if (typing) { typing.remove(); }
     // live state: permission bar ONLY when a dialog is really on screen
@@ -1170,8 +1200,9 @@ async function pollChat(force) {         // fetches double-append messages
     for (const b of perm.querySelectorAll('button'))   // y/n banners have
       b.style.display = d.perm && d.perm[b.dataset.a] ? '' : 'none';
     const m2 = META[d.status] || { i: '❔', c: '#6c7086' };
-    document.getElementById('chat-ico').textContent = m2.i;
-    document.getElementById('chat-ico').style.color = m2.c;
+    const cmpct = d.live && d.live.label === 'compacting';
+    document.getElementById('chat-ico').textContent = cmpct ? '⌛' : m2.i;
+    document.getElementById('chat-ico').style.color = cmpct ? '#4a5378' : m2.c;
   } finally {
     chatBusy = false;
   }
@@ -1179,11 +1210,32 @@ async function pollChat(force) {         // fetches double-append messages
 function mkMsg(m) {              // build the bubble; caller appends/scrolls
   const div = document.createElement('div');
   div.className = 'm ' + (m.role === 'user' ? 'user' : m.role === 'tool' ? 'tool'
-    : m.role === 'info' ? 'info' : m.role === 'think' ? 'think' : 'asst');
+    : m.role === 'info' ? 'info' : m.role === 'think' ? 'think'
+    : m.role === 'compact' ? 'compact' : 'asst');
   if (m.role === 'user' && m.text[0] === '/')   // slash command: a centered
     div.className = 'm cmd';                    // chip, not a right bubble
   if (m.role === 'tool') div.textContent = '⚙ ' + m.text;
   else if (m.role === 'user' || m.role === 'info') div.textContent = m.text;
+  else if (m.role === 'compact') {   // the summary is a numbered template
+    const d = document.createElement('details');   // (1. Primary Request … 9.
+    const sm = document.createElement('summary');  // Optional Next Step) — fold
+    sm.textContent = 'compact 摘要 · ' + m.text.length + ' 字';  // each section so
+    const tx = document.createElement('div');      // the card is an outline,
+    let folded = false;                            // not a 16k-char wall
+    for (const p of m.text.split(/^(?=\d+\. )/m)) {
+      const hm = p.match(/^(\d+)\. (.*)/);   // preamble before section 1 is
+      if (!hm) continue;                     // template boilerplate — skip it
+      const sd = document.createElement('details'); sd.className = 'sec';
+      if (hm[1] === '1') sd.open = true;     // "what was this about" stays open
+      const ss = document.createElement('summary');
+      ss.textContent = hm[2].replace(/:$/, '');
+      const bd = document.createElement('div'); bd.innerHTML = md(p.slice(hm[0].length));
+      sd.appendChild(ss); sd.appendChild(bd); tx.appendChild(sd);
+      folded = true;
+    }
+    if (!folded) tx.innerHTML = md(m.text);  // unexpected shape: flat markdown
+    d.appendChild(sm); d.appendChild(tx); div.appendChild(d);
+  }
   else if (m.role === 'think') {
     const d = document.createElement('details');
     const sm = document.createElement('summary'); sm.textContent = 'thinking…';
