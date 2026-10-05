@@ -824,6 +824,15 @@ PAGE = r"""<!doctype html>
            border-bottom:1px solid #1e2130; flex:none; }
   #dwait { color:#f38ba8; font-size:11px; font-weight:600; margin-left:auto; }
   #drows { flex:1; overflow-y:auto; padding:6px 0; }
+  .dgrp { color:#5b6280; font-size:11px; font-weight:600;
+          padding:10px 14px 4px; }        /* project header — rows arrive
+          already ts-sorted, so first appearance = group order */
+  .dempty { color:#5b6280; font-size:12px; padding:14px; text-align:center; }
+  #dfilter { flex:none; margin:8px 12px 2px; background:#0c0d14;
+             border:1px solid #2a2f45; border-radius:8px; color:#e8eaf6;
+             font-size:13px; font-family:inherit; padding:6px 10px;
+             outline:none; }
+  #dfilter::placeholder { color:#3a4160; }
   .drow { display:flex; align-items:center; gap:10px; padding:10px 14px; }
   .drow .ico { flex:none; font-size:15px; }
   .drow .dn { min-width:0; flex:1; }
@@ -958,6 +967,7 @@ PAGE = r"""<!doctype html>
      must NOT live inside #chat or it would be pushed along with it.
      No ✕: phones close via scrim tap, wide screens via click-away/Esc -->
   <div class="dhead"><span>agents</span><span id="dwait"></span></div>
+  <input id="dfilter" placeholder="搜索标题 / 项目…" autocomplete="off">
   <div id="drows"></div>
 </div>
 <div id="term"><div id="xwrap"></div><div id="keys">
@@ -1189,16 +1199,36 @@ function renderDrawer() {
   box.innerHTML = '';
   const wait = lastRows.filter(r => r.status === 'waiting').length;
   document.getElementById('dwait').textContent = wait ? '⏳ ' + wait : '';
-  for (const r of lastRows) {
-    const m = META[r.status] || { i:'❔', c:'#6c7086' };
-    const d = document.createElement('div');
-    d.className = 'drow' + (r.pane === chatPane ? ' cur' : '');
-    d.innerHTML = `<span class="ico" style="color:${m.c}">${m.i}</span>` +
-      `<div class="dn"><div class="t">${esc(r.title || r.window)}</div>` +
-      `<div class="s">${esc(r.agent)} · ${esc(r.project)}${r.age ? ' · ' + r.age : ''}</div></div>`;
-    d.onclick = () => { toggleDrawer(false);
-                        if (r.pane !== chatPane) openChat(r.pane, r); };
-    box.appendChild(d);
+  const q = document.getElementById('dfilter').value.trim().toLowerCase();
+  const rows = lastRows.filter(r => !q ||       // filter hits title, project
+      (r.title || r.window || '').toLowerCase().includes(q) ||
+      (r.project || '').toLowerCase().includes(q) ||
+      (r.agent || '').toLowerCase().includes(q));
+  const groups = new Map();                     // rows are ts-sorted, so
+  for (const r of rows) {                       // first appearance fixes the
+    const g = r.project || '—';                 // group order too
+    (groups.get(g) || groups.set(g, []).get(g)).push(r);
+  }
+  if (!groups.size) {                           // a query that matches nothing
+    const e = document.createElement('div');
+    e.className = 'dempty'; e.textContent = '无匹配';
+    box.appendChild(e); return;
+  }
+  for (const [proj, grs] of groups) {
+    const h = document.createElement('div');
+    h.className = 'dgrp'; h.textContent = proj;
+    box.appendChild(h);
+    for (const r of grs) {
+      const m = META[r.status] || { i:'❔', c:'#6c7086' };
+      const d = document.createElement('div');
+      d.className = 'drow' + (r.pane === chatPane ? ' cur' : '');
+      d.innerHTML = `<span class="ico" style="color:${m.c}">${m.i}</span>` +
+        `<div class="dn"><div class="t">${esc(r.title || r.window)}</div>` +
+        `<div class="s">${esc(r.agent)} · ${esc(r.project)}${r.age ? ' · ' + r.age : ''}</div></div>`;
+      d.onclick = () => { toggleDrawer(false);
+                          if (r.pane !== chatPane) openChat(r.pane, r); };
+      box.appendChild(d);
+    }
   }
 }
 function toggleDrawer(on) {
@@ -1208,7 +1238,8 @@ function toggleDrawer(on) {
   document.getElementById('chat').classList.toggle('shift', show);
   document.getElementById('scrim').hidden = !show;   // phone overlay mode;
   if (show) renderDrawer();                          // wide CSS drops it and
-}                                                    // pushes the chat instead
+  else document.getElementById('dfilter').value = ''; // pushes the chat —
+}                                                    // fresh filter next open
 // keyboard open/shrink: keep the transcript's end right above the composer.
 // iOS also scrolls the page itself for the focused input — undo that.
 if (window.visualViewport) visualViewport.addEventListener('resize', () => {
@@ -1444,6 +1475,7 @@ document.getElementById('ctx').onclick = () => {    // tap for model + tokens
   d.hidden = !d.hidden;
 };
 document.getElementById('chat-menu').onclick = () => toggleDrawer();
+document.getElementById('dfilter').addEventListener('input', renderDrawer);
 document.addEventListener('click', ev => {  // phone only: a tap on the scrim
   const dr = document.getElementById('drawer');   // (the dimmed blank) closes.
   if (!dr.classList.contains('on')) return;       // Wide screens keep drawer
