@@ -763,7 +763,8 @@ PAGE = r"""<!doctype html>
 <style>  :root { color-scheme: dark; }
   body { margin:0; background:#11121a; color:#cdd0e0;
          font:15px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;
-         padding: max(12px, env(safe-area-inset-top)) 14px 24px; }
+         padding: max(12px, env(safe-area-inset-top)) 14px 24px;
+         --dw: min(80vw, 320px); }   /* drawer width = how far chat is pushed */
   .row { display:flex; align-items:center; gap:10px; padding:11px 8px;
          border-bottom:1px solid #1e2130; cursor:pointer; }
   .row:active { background:#171a26; }
@@ -784,8 +785,16 @@ PAGE = r"""<!doctype html>
           z-index:10; background:#0c0d14; display:none; flex-direction:column; }
   #term.on { display:flex; }
   #chat { position:fixed; top:0; left:0; right:0; height:var(--vh,100dvh);
-          z-index:9; background:#11121a; display:none; flex-direction:column; }
+          z-index:9; background:#11121a; display:none; flex-direction:column;
+          transition:left .18s ease; }
   #chat.on { display:flex; }
+  @media (min-width:768px) {         /* wide screens: the drawer takes the
+          left column and the chat NARROWS — animating `left`, not transform
+          (a transform would shove the right edge, send button included,
+          off-screen); phone overlay mode never moves #chat at all */
+    #chat.shift { left:var(--dw); }
+    #scrim { display:none; }
+  }
   #chat header { flex:none; display:flex; align-items:center; gap:8px;
                  padding:10px 12px; border-bottom:1px solid #1e2130;
                  padding-top: max(10px, env(safe-area-inset-top)); }
@@ -803,6 +812,26 @@ PAGE = r"""<!doctype html>
            border-radius:14px; }
   #chat header button { background:none; border:0;
                         color:#8a91b0; font-size:18px; padding:4px 8px; }
+  #scrim { position:fixed; inset:0; background:rgba(6,7,12,.55); z-index:19; }
+  #drawer { position:fixed; top:0; bottom:0; left:0; width:var(--dw);
+            background:#161827; border-right:1px solid #2a2f45; z-index:20;
+            transform:translateX(-102%); transition:transform .18s ease;
+            display:flex; flex-direction:column;
+            padding-top:max(8px, env(safe-area-inset-top)); }
+  #drawer.on { transform:none; }
+  .dhead { display:flex; align-items:center; gap:8px; padding:8px 14px;
+           color:#8a91b0; font-size:13px; font-weight:600;
+           border-bottom:1px solid #1e2130; flex:none; }
+  #dwait { color:#f38ba8; font-size:11px; font-weight:600; margin-left:auto; }
+  #drows { flex:1; overflow-y:auto; padding:6px 0; }
+  .drow { display:flex; align-items:center; gap:10px; padding:10px 14px; }
+  .drow .ico { flex:none; font-size:15px; }
+  .drow .dn { min-width:0; flex:1; }
+  .drow .dn .t { color:#cdd0e0; font-size:14px; white-space:nowrap;
+                 overflow:hidden; text-overflow:ellipsis; }
+  .drow .dn .s { color:#5b6280; font-size:11px; white-space:nowrap;
+                 overflow:hidden; text-overflow:ellipsis; }
+  .drow.cur { background:#1a1d2b; box-shadow:inset 3px 0 0 #7c86ad; }
   #ctx { margin-left:auto; flex:none; font-size:11px; font-weight:600;
          padding:3px 9px; border-radius:9px; background:#1a1f30; }
   #ctxd { flex:none; font-size:11px; color:#5b6280; padding:5px 12px;
@@ -903,7 +932,7 @@ PAGE = r"""<!doctype html>
      border:1px solid rgba(243,139,168,.35);box-shadow:0 4px 16px rgba(0,0,0,.45)"></div>
 <div id="list"></div>
 <div id="empty" hidden>no agents running</div>
-<div id="chat"><header><span id="chat-ico"></span><span class="name" id="chat-name"></span>
+<div id="chat"><header><button id="chat-menu">☰</button><span id="chat-ico"></span><span class="name" id="chat-name"></span>
   <span class="sub" id="chat-sub"></span>
   <span id="ctx"></span>
   <button id="chat-close">✕</button></header>
@@ -922,6 +951,14 @@ PAGE = r"""<!doctype html>
     <div id="cmds"><span id="modec">⇄ mode</span>
       <span data-c="/compact">⌘ compact</span>
       <button id="chat-send">发送</button></div></div></div>
+</div>
+<div id="scrim" hidden></div>
+<div id="drawer">   <!-- body-level: #chat gets a transform when pushed —
+     transformed ancestors reposition their fixed children, so the drawer
+     must NOT live inside #chat or it would be pushed along with it.
+     No ✕: phones close via scrim tap, wide screens via click-away/Esc -->
+  <div class="dhead"><span>agents</span><span id="dwait"></span></div>
+  <div id="drows"></div>
 </div>
 <div id="term"><div id="xwrap"></div><div id="keys">
   <button data-k="esc">Esc</button><button data-k="enter">⏎</button>
@@ -1069,6 +1106,7 @@ async function tick() {
   chkVer(d.ver);
   const rows = d.agents;
   rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));  // most recently used first
+  lastRows = rows;                          // the chat drawer reads the same
   diffAlerts(rows);
   const sig = JSON.stringify(rows);
   if (sig === lastRowsSig) return;        // nothing changed: keep the DOM
@@ -1093,6 +1131,8 @@ async function tick() {
     list.appendChild(row);
     if (open[r.pane]) attachPreview(r.pane, row);
   }
+  if (document.getElementById('drawer').classList.contains('on'))
+    renderDrawer();                        // live-refresh while switching view
 }
 async function toggle(pane, row) {
   if (open[pane]) { open[pane].remove(); delete open[pane]; return; }
@@ -1139,7 +1179,36 @@ function closeChat() {
   saveDraft();
   chatPane = null;
   document.getElementById('chat').classList.remove('on');
+  toggleDrawer(false);                    // never leave the drawer dangling
 }
+/* left drawer: agent switcher while a chat is open — tap ☰ to pull it
+   out, tap a row to jump straight into that agent's transcript */
+let lastRows = [];
+function renderDrawer() {
+  const box = document.getElementById('drows');
+  box.innerHTML = '';
+  const wait = lastRows.filter(r => r.status === 'waiting').length;
+  document.getElementById('dwait').textContent = wait ? '⏳ ' + wait : '';
+  for (const r of lastRows) {
+    const m = META[r.status] || { i:'❔', c:'#6c7086' };
+    const d = document.createElement('div');
+    d.className = 'drow' + (r.pane === chatPane ? ' cur' : '');
+    d.innerHTML = `<span class="ico" style="color:${m.c}">${m.i}</span>` +
+      `<div class="dn"><div class="t">${esc(r.title || r.window)}</div>` +
+      `<div class="s">${esc(r.agent)} · ${esc(r.project)}${r.age ? ' · ' + r.age : ''}</div></div>`;
+    d.onclick = () => { toggleDrawer(false);
+                        if (r.pane !== chatPane) openChat(r.pane, r); };
+    box.appendChild(d);
+  }
+}
+function toggleDrawer(on) {
+  const dr = document.getElementById('drawer');
+  const show = on === undefined ? !dr.classList.contains('on') : on;
+  dr.classList.toggle('on', show);
+  document.getElementById('chat').classList.toggle('shift', show);
+  document.getElementById('scrim').hidden = !show;   // phone overlay mode;
+  if (show) renderDrawer();                          // wide CSS drops it and
+}                                                    // pushes the chat instead
 // keyboard open/shrink: keep the transcript's end right above the composer.
 // iOS also scrolls the page itself for the focused input — undo that.
 if (window.visualViewport) visualViewport.addEventListener('resize', () => {
@@ -1374,6 +1443,18 @@ document.getElementById('ctx').onclick = () => {    // tap for model + tokens
   const d = document.getElementById('ctxd');
   d.hidden = !d.hidden;
 };
+document.getElementById('chat-menu').onclick = () => toggleDrawer();
+document.addEventListener('click', ev => {  // phone only: a tap on the scrim
+  const dr = document.getElementById('drawer');   // (the dimmed blank) closes.
+  if (!dr.classList.contains('on')) return;       // Wide screens keep drawer
+  if (dr.contains(ev.target)) return;             // and chat side by side —
+  if (ev.target.closest && ev.target.closest('#chat-menu')) return;  // clicks
+  if (matchMedia('(min-width:768px)').matches) return;  // in the chat must
+  toggleDrawer(false);                            // NOT dismiss; ☰/Esc only
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') toggleDrawer(false);
+});
 document.getElementById('cmds').onclick = ev => {   // one-tap slash commands
   const c = ev.target.dataset && ev.target.dataset.c;
   if (!c || !chatPane) return;
