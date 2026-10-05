@@ -269,15 +269,17 @@ def read_chat(path, after):
         size = os.path.getsize(path)
     except OSError:
         return after, after, []
-    if after < 0 or after > size:            # first fetch / file rotated
-        after = max(0, size - 131072)
-    elif after < size - 262144:              # stale client: clamp, never
-        after = max(0, size - 131072)        # parse the whole history
     try:
-        with open(path, errors="replace") as f:
-            f.seek(after)
-            chunk = f.read()
-    except OSError:
+        with open(path, "rb") as f:
+            if after < 0 or after > size or after < size - 262144:
+                after = max(0, size - 131072)   # first fetch / stale client:
+                f.seek(after)                   # clamp, never parse the whole
+                nl = f.read(4194304).find(b"\n")  # history — and align FORWARD
+                if nl >= 0:                     # to a line start: the clamp
+                    after += nl + 1             # can land inside ONE giant
+            f.seek(after)                       # record (a 344KB compact
+            chunk = f.read().decode(errors="replace")   # summary line) and
+    except OSError:                             # tear it apart
         return after, after, []
     cut = chunk.rfind("\n")                  # keep the partial tail for next poll
     if cut < 0:
@@ -360,20 +362,33 @@ def read_chat_before(path, before, window=262144):
     except OSError:
         return before, True, []
     before = min(before, size)
-    start = max(0, before - window)
-    try:
-        with open(path, "rb") as f:     # binary: text-mode read(n) counts
-            f.seek(start)               # CHARS not bytes — multibyte text
-            raw = f.read(before - start)  # would read past the boundary
-    except OSError:
-        return before, False, []
-    if start > 0:
-        nl = raw.find(b"\n")            # align head to a line boundary: it
-        if nl < 0:                      # becomes the NEXT page's end —
-            return before, False, []    # mid-line it would tear one message
-        start += nl + 1                 # in half (one lost per page)
-        raw = raw[nl + 1:]
-    return start, start == 0, parse_msgs(raw.decode(errors="replace").split("\n"))
+    for grow in (window, 4 * window, 16 * window):
+        # one record can outweigh the whole page — a compact summary ran
+        # 344KB on a SINGLE line, and a window landing inside it holds no
+        # newline to align on: grow until one shows up
+        base = max(0, before - grow)
+        try:
+            with open(path, "rb") as f:
+                f.seek(base)
+                raw = f.read(before - base)
+        except OSError:
+            return before, False, []
+        if base == 0:
+            return 0, True, parse_msgs(
+                raw.decode(errors="replace").split("\n"))
+        nl = raw.find(b"\n")
+        if nl < 0:
+            continue                    # window inside one giant line
+        ideal = before - window - base  # newest boundary that still fits one
+        idx = raw.find(b"\n", max(0, ideal))   # page; if the ideal span is
+        if base + idx + 1 >= before:    # ONE giant line, its own tail newline
+            idx = raw.rfind(b"\n", 0, idx)     # is degenerate (start==before):
+            if idx < 0:                 # page the giant WHOLE instead — back
+                continue                # up to the boundary before its head
+        start = base + (idx if idx >= 0 else nl) + 1
+        return start, False, parse_msgs(
+            raw[start - base:].decode(errors="replace").split("\n"))
+    return before, False, []
 
 
 
@@ -1154,14 +1169,18 @@ document.getElementById('msgs').addEventListener('click', async ev => {
   const b = ev.target;
   b.textContent = '加载中…';
   try {
-    const res = await fetch(`/api/chat/${chatPane}?token=${token}&before=${chatHead}`);
-    if (!res.ok) throw 0;
-    const d = await res.json();
+    let d;                       // a page can be ONE unrenderable giant
+    for (let hop = 0; hop < 4; hop++) {   // record — 0 msgs but head moved:
+      const res = await fetch(`/api/chat/${chatPane}?token=${token}&before=${chatHead}`);
+      if (!res.ok) throw 0;              // hop past it without a dead click
+      d = await res.json();
+      chatHead = d.head; chatDone = d.done;
+      if (d.messages.length || d.done) break;
+    }
     const box = document.getElementById('msgs');
     const oh = box.scrollHeight, ost = box.scrollTop;   // prepend without
     const frag = document.createDocumentFragment();     // jumping the view
     for (const m of d.messages) frag.appendChild(mkMsg(m));
-    chatHead = d.head; chatDone = d.done;
     box.insertBefore(frag, b);            // older messages go above the pill
     b.remove(); ensureOlder();            // fresh pill if pages remain
     box.scrollTop = ost + (box.scrollHeight - oh);
