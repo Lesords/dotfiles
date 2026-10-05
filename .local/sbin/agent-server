@@ -411,8 +411,8 @@ def transcript_pending_tool(path):
                     for k in ("command", "file_path", "pattern", "description",
                               "query", "url", "path", "prompt"):
                         if inp.get(k):
-                            summ = str(inp[k])[:60]
-                            break
+                            summ = str(inp[k])[:4096]  # the perm card scrolls
+                            break                      # — show it whole
                     try:
                         dt = datetime.fromisoformat(
                             e["timestamp"].replace("Z", "+00:00"))
@@ -442,6 +442,11 @@ def parse_opts(text):
             opts.setdefault("always", num)                 # numbered list
         elif re.match(r"^(no|deny|skip|cancel|not now|拒绝)", txt):  # in
             opts.setdefault("deny", num)                   # transcript
+        elif (re.match(r"^yes[,，]", txt) and "auto" not in txt
+              and "switch" not in txt):
+            opts.setdefault("always", num)   # "Yes, allow … this session"
+            # — the wide-grant middle option; auto-mode switchers are NOT
+            # a don't-ask-again and must not wear that button's label
     for num, txt in cands:             # allow: LOWEST number whose line is
         if (num != opts.get("always") and num != opts.get("deny")   # a plain
                 and re.match(r"^(yes|allow|proceed|approve|允许)", txt)):
@@ -823,13 +828,23 @@ PAGE = r"""<!doctype html>
   .m code { font:13px ui-monospace,monospace; background:#0c0d14;
             border-radius:4px; padding:0 4px; }
   .m pre code { background:none; padding:0; }
-  #perm { flex:none; display:none; gap:8px; padding:0 8px 8px; }
-  #perm.on { display:flex; }
-  #perm button { flex:1; border:0; border-radius:12px; padding:12px 0;
-                 font-size:15px; }
-  #perm button:nth-child(1) { background:#2f4a38; color:#a6e3a1; }
-  #perm button:nth-child(2) { background:#2a3550; color:#cdd0e0; }
-  #perm button:nth-child(3) { background:#4a2f36; color:#f38ba8; }
+  #perm { flex:none; display:none; margin:0 8px 8px; background:#1a1d2b;
+          border:1px solid #2a2f45; border-radius:14px; padding:10px; }
+  #perm.on { display:block; }
+  #pname { font-size:13px; font-weight:600; color:#7c86ad; }
+  #pwhat { background:#0c0d14; border-radius:8px; padding:10px; margin:6px 0 8px;
+           font:13px/1.5 ui-monospace,monospace; color:#cdd0e0;
+           white-space:pre-wrap; word-break:break-all;
+           max-height:28vh; overflow-y:auto; }
+  #pbtns { display:flex; gap:8px; }
+  #pbtns button { flex:none; border:1px solid; border-radius:12px;
+                  padding:6px 16px; font-size:13px; background:none; }
+  #pbtns button[data-a=allow] { color:#a6e3a1; border-color:#2f4a38;
+                                background:#1c2924; }
+  #pbtns button[data-a=always] { color:#cdd0e0; border-color:#2a3550;
+                                 background:#1e2333; }
+  #pbtns button[data-a=deny] { color:#f38ba8; border-color:#4a2f36;
+                               background:#2c2027; }
   #cmds { display:flex; align-items:center; gap:6px; padding:0 2px; }
   #cmds span { flex:none; font-size:12px; color:#8a91b0; padding:5px 12px;
                border:1px solid #2a2f45; border-radius:12px; }
@@ -880,9 +895,13 @@ PAGE = r"""<!doctype html>
   <div id="ctxd" hidden></div>
   <div id="msgs"></div>
   <div id="perm">
-    <button data-a="allow">✅ 允许</button>
-    <button data-a="always">✅✅ 不再询问</button>
-    <button data-a="deny">❌ 拒绝</button>
+    <div id="pname"></div>
+    <div id="pwhat"></div>
+    <div id="pbtns">
+    <button data-a="allow">允许</button>
+    <button data-a="always">不再询问</button>
+    <button data-a="deny">拒绝</button>
+    </div>
   </div>
   <div id="composer"><div id="cbox"><textarea id="chat-in" rows="1" placeholder="发消息给 agent…"></textarea>
     <div id="cmds"><span id="modec">⇄ mode</span>
@@ -1209,6 +1228,13 @@ async function pollChat(force) {         // fetches double-append messages
     const perm = document.getElementById('perm');
     chatPerm = d.perm;                   // {allow:"1", always:"2", deny:"3"}
     perm.classList.toggle('on', !!(d.perm && d.perm.allow));
+    document.getElementById('pname').textContent =   // the card says WHAT
+      d.perm && d.perm.tool ? '⚙ ' + d.perm.tool : '';   // is asked, not
+    document.getElementById('pwhat').textContent = d.perm && d.perm.what || '';
+    document.getElementById('pname').style.display =
+      d.perm && d.perm.tool ? '' : 'none';
+    document.getElementById('pwhat').style.display =
+      d.perm && d.perm.what ? '' : 'none';
     for (const b of perm.querySelectorAll('button'))   // y/n banners have
       b.style.display = d.perm && d.perm[b.dataset.a] ? '' : 'none';
     const m2 = META[d.status] || { i: '❔', c: '#6c7086' };
@@ -1596,6 +1622,10 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 perm = detect_perm(pane)
             perm = perm_gate(screen, status, path, pane) or perm
+            if perm:                # attach WHAT is being approved — the
+                pend = transcript_pending_tool(path)   # card shows content,
+                if pend:            # not three mystery buttons
+                    perm = dict(perm, tool=pend[0], what=pend[1])
             self._send(200, json.dumps({"offset": offset, "head": head,
                                         "messages": msgs,
                                         "status": status, "wait": wait,
