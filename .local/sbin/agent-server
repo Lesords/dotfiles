@@ -763,7 +763,7 @@ PAGE = r"""<!doctype html>
 <style>  :root { color-scheme: dark; }
   body { margin:0; background:#11121a; color:#cdd0e0;
          font:15px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;
-         padding: max(12px, env(safe-area-inset-top)) 14px 24px;
+         padding: calc(46px + env(safe-area-inset-top)) 14px 24px;
          --dw: min(80vw, 320px); }   /* drawer width = how far chat is pushed */
   .row { display:flex; align-items:center; gap:10px; padding:11px 8px;
          border-bottom:1px solid #1e2130; cursor:pointer; }
@@ -828,11 +828,21 @@ PAGE = r"""<!doctype html>
           padding:10px 14px 4px; }        /* project header — rows arrive
           already ts-sorted, so first appearance = group order */
   .dempty { color:#5b6280; font-size:12px; padding:14px; text-align:center; }
-  #dfilter { flex:none; margin:8px 12px 2px; background:#0c0d14;
+  #dfilter, #lfilter { background:#0c0d14;
              border:1px solid #2a2f45; border-radius:8px; color:#e8eaf6;
              font-size:13px; font-family:inherit; padding:6px 10px;
              outline:none; }
-  #dfilter::placeholder { color:#3a4160; }
+  #dfilter { flex:none; margin:8px 12px 2px; }
+  #dfilter::placeholder, #lfilter::placeholder { color:#3a4160; }
+  #topbar { position:fixed; top:0; left:0; right:0; z-index:5;
+            display:flex; align-items:center; gap:8px;
+            padding:6px 10px;
+            padding-top:max(8px, env(safe-area-inset-top));
+            background:#11121a; }
+  #mute { color:#3a4160; font-size:15px; cursor:pointer; flex:none; }
+  #ping { font-size:11px; color:#3a4160; flex:none; min-width:36px;
+          text-align:right; }
+  #lfilter { flex:1; width:auto; min-width:0; }
   .drow { display:flex; align-items:center; gap:10px; padding:10px 14px; }
   .drow .ico { flex:none; font-size:15px; }
   .drow .dn { min-width:0; flex:1; }
@@ -929,10 +939,12 @@ PAGE = r"""<!doctype html>
   #keys button.armed { background:#f38ba8; color:#11121a; }
 </style></head><body>
 <div id="err" hidden style="color:#f38ba8;padding:24px 4px"></div>
-<div id="ping" style="position:fixed;right:10px;top:calc(6px + env(safe-area-inset-top));
-     font-size:11px;color:#3a4160;z-index:5"></div>
-<div id="mute" style="position:fixed;left:10px;top:calc(6px + env(safe-area-inset-top));
-     font-size:15px;color:#3a4160;z-index:5;cursor:pointer">🔔</div>
+<div id="topbar">   <!-- one fixed bar: bell, list filter, ping — the filter
+     used to flow under the two fixed corner icons and overlap them -->
+  <div id="mute">🔔</div>
+  <input id="lfilter" placeholder="搜索标题 / 项目…" autocomplete="off">
+  <span id="ping"></span>
+</div>
 <div id="wbar" hidden style="position:fixed;left:50%;transform:translateX(-50%);
      bottom:calc(16px + env(safe-area-inset-bottom));max-width:86%;white-space:nowrap;
      overflow:hidden;text-overflow:ellipsis;background:rgba(74,47,54,.94);
@@ -1121,28 +1133,51 @@ async function tick() {
   const sig = JSON.stringify(rows);
   if (sig === lastRowsSig) return;        // nothing changed: keep the DOM
   lastRowsSig = sig;                       // (and the open previews with it)
-  const list = document.getElementById('list');
-  list.innerHTML = '';
-  document.getElementById('empty').hidden = rows.length > 0;
-  for (const r of rows) {
-    const m = META[r.status] || { i:'❔', c:'#6c7086', n:2 };
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = `<span class="ico" style="color:${m.c}">${m.i}</span>` +
-      `<div class="rmain"><span class="win">${esc(r.title || r.window)}</span>` +
-      `<div class="rsub">${esc(r.agent)} · ${esc(r.project)}${r.age ? ' · ' + r.age : ''}</div></div>` +
-      `<span class="btns"><span data-a="eye">👁</span><span data-a="tty">⌨</span></span>`;
-    row.onclick = ev => {
-      const a = ev.target.dataset && ev.target.dataset.a;
-      if (a === 'tty') { openTerm(r.pane); return; }
-      if (a === 'eye') { toggle(r.pane, row); return; }
-      openChat(r.pane, r);            // tap the row itself → chat (orca-style)
-    };
-    list.appendChild(row);
-    if (open[r.pane]) attachPreview(r.pane, row);
-  }
+  renderList();
   if (document.getElementById('drawer').classList.contains('on'))
     renderDrawer();                        // live-refresh while switching view
+}
+function renderList() {                    // home list: same grouping and
+  const list = document.getElementById('list');   // filtering as the drawer
+  list.innerHTML = '';
+  document.getElementById('empty').hidden = lastRows.length > 0;
+  const q = document.getElementById('lfilter').value.trim().toLowerCase();
+  const rows = lastRows.filter(r => !q ||
+      (r.title || r.window || '').toLowerCase().includes(q) ||
+      (r.project || '').toLowerCase().includes(q) ||
+      (r.agent || '').toLowerCase().includes(q));
+  const groups = new Map();
+  for (const r of rows) {
+    const g = r.project || '—';
+    (groups.get(g) || groups.set(g, []).get(g)).push(r);
+  }
+  if (!groups.size) {
+    const e = document.createElement('div');
+    e.className = 'dempty'; e.textContent = '无匹配';
+    list.appendChild(e); return;
+  }
+  for (const [proj, grs] of groups) {
+    const h = document.createElement('div');
+    h.className = 'dgrp'; h.textContent = proj;
+    list.appendChild(h);
+    for (const r of grs) {
+      const m = META[r.status] || { i:'❔', c:'#6c7086', n:2 };
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<span class="ico" style="color:${m.c}">${m.i}</span>` +
+        `<div class="rmain"><span class="win">${esc(r.title || r.window)}</span>` +
+        `<div class="rsub">${esc(r.agent)} · ${esc(r.project)}${r.age ? ' · ' + r.age : ''}</div></div>` +
+        `<span class="btns"><span data-a="eye">👁</span><span data-a="tty">⌨</span></span>`;
+      row.onclick = ev => {
+        const a = ev.target.dataset && ev.target.dataset.a;
+        if (a === 'tty') { openTerm(r.pane); return; }
+        if (a === 'eye') { toggle(r.pane, row); return; }
+        openChat(r.pane, r);            // tap the row itself → chat (orca-style)
+      };
+      list.appendChild(row);
+      if (open[r.pane]) attachPreview(r.pane, row);
+    }
+  }
 }
 async function toggle(pane, row) {
   if (open[pane]) { open[pane].remove(); delete open[pane]; return; }
@@ -1476,6 +1511,7 @@ document.getElementById('ctx').onclick = () => {    // tap for model + tokens
 };
 document.getElementById('chat-menu').onclick = () => toggleDrawer();
 document.getElementById('dfilter').addEventListener('input', renderDrawer);
+document.getElementById('lfilter').addEventListener('input', renderList);
 document.addEventListener('click', ev => {  // phone only: a tap on the scrim
   const dr = document.getElementById('drawer');   // (the dimmed blank) closes.
   if (!dr.classList.contains('on')) return;       // Wide screens keep drawer
