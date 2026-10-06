@@ -250,6 +250,38 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Ctrl + Shift + e | Click URL with keyboard  |
 | Ctrl + Shift + u | Input unicode character  |
 
+## Agent services
+
+| Service | Port | Purpose |
+|---|---|---|
+| `agent-server` | 7678 (HTTP) + 7679 (WS) | mobile web view of tmux agents |
+| `agent-hub` | 7680 | aggregate agent-server instances across LAN devices |
+
+Dependencies:
+
+```bash
+sudo apt install python3 python3-websockets
+# or without sudo
+python3 -m pip install --user websockets
+```
+
+Files land via `./dot install`; the services themselves need enabling once:
+
+```bash
+systemctl --user enable --now agent-server agent-hub
+```
+
+Tokens live in `~/.config/agent-server/token` / `~/.config/agent-hub/token`
+(gitignored) — open `http://<lan-ip>:7678/?token=<token>` on the phone
+(7680 for the hub). To attach another device to the hub, deploy agent-server
+there and add one line to `~/.config/agent-hub/nodes.json` (re-read on every
+poll, no restart needed):
+
+```json
+[{"name": "desktop", "url": "http://127.0.0.1:7678", "token": "..."},
+ {"name": "board",   "url": "http://192.168.1.78:7678", "token": "..."}]
+```
+
 ## Neovim
 
 [nvim](./.config/nvim/README.md)
