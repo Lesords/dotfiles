@@ -705,6 +705,22 @@ async def term_handler(ws, path):
         loop.add_reader(fd, pump)
         watchdog = asyncio.ensure_future(death_watch())
         watchdog.add_done_callback(lambda t: t.cancelled() or t.exception())
+        # a NO-OP resize (phone asked for the size the pane already has —
+        # common on reopen once window-size policy clamped the restore)
+        # skips the app's full redraw, so bytes lost between capture-pane
+        # and pipe attach are never healed. Nudge SIGWINCH: the app repaints
+        # and the pipe streams one whole clean frame.
+        await asyncio.to_thread(resize_pane, pane, cols, rows + 1)
+        await asyncio.to_thread(resize_pane, pane, cols, rows)
+        await asyncio.sleep(0.25)    # an ATTACHED desktop client (window-size
+        eff2 = await asyncio.to_thread(pane_geometry, pane)  # =latest) fights
+        if eff2 and (eff2[0], eff2[1]) != (cols, rows):      # the phone resize
+            await ws.send(json.dumps({"cols": eff2[0],    # and usually wins —
+                                      "rows": eff2[1]}))   # xterm must match
+            cols, rows = eff2[0], eff2[1]                  # the pane that
+            await asyncio.to_thread(       # actually won, or wide frames wrap
+                resize_pane, pane, cols, rows + 1)
+            await asyncio.to_thread(resize_pane, pane, cols, rows)
         async for msg in ws:
             if not isinstance(msg, str):
                 continue
@@ -1592,7 +1608,10 @@ async function openTerm(pane) {
   closeTerm();
   document.getElementById('term').classList.add('on');
   term = new Terminal({ fontSize: 13, scrollback: 5000, cursorBlink: true,
-                        theme: { background: '#0c0d14' } });
+                        convertEol: true,   // capture-pane joins lines with
+                        theme: { background: '#0c0d14' } });  // bare \n — a
+  // real pty turns it into \r\n (ONLCR); xterm would otherwise keep the
+  // column on every newline and the whole dump staircases to the right
   fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(document.getElementById('xwrap'));
