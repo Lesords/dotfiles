@@ -261,30 +261,34 @@ def transcript_path(session_id):
 def read_chat(path, after):
     """Messages from the transcript after byte offset `after` (append-only).
 
-    Returns (new_offset, messages). User texts and assistant text blocks
-    become chat messages; tool calls collapse to a one-liner. Sidechain
-    (subagent) entries and system wrappers are skipped.
+    Returns (new_offset, head, messages, reset): head = the window's start
+    byte (the chat's load-older anchor); reset=True on the stale-client
+    clamp — the caller re-sent the recent WINDOW, so the client must
+    replace its view instead of appending (or everything doubles).
     """
+    reset = False
     try:
         size = os.path.getsize(path)
     except OSError:
-        return after, after, []
+        return after, after, [], False
     try:
         with open(path, "rb") as f:
             if after < 0 or after > size or after < size - 262144:
-                after = max(0, size - 131072)   # first fetch / stale client:
-                f.seek(after)                   # clamp, never parse the whole
-                nl = f.read(4194304).find(b"\n")  # history — and align FORWARD
-                if nl >= 0:                     # to a line start: the clamp
-                    after += nl + 1             # can land inside ONE giant
-            f.seek(after)                       # record (a 344KB compact
-            chunk = f.read().decode(errors="replace")   # summary line) and
-    except OSError:                             # tear it apart
-        return after, after, []
-    cut = chunk.rfind("\n")                  # keep the partial tail for next poll
-    if cut < 0:
-        return after, after, []
-    return after + cut + 1, after, parse_msgs(chunk[:cut].splitlines())
+                reset = True                   # first fetch / stale client /
+                after = max(0, size - 131072)  # rotated file: clamp, never
+                f.seek(after)                  # parse the whole history — and
+                nl = f.read(4194304).find(b"\n")   # align FORWARD to a line
+                if nl >= 0:                    # start: the clamp can land
+                    after += nl + 1            # inside ONE giant record (a
+            f.seek(after)                      # 344KB compact summary line)
+            raw = f.read()
+    except OSError:
+        return after, after, [], False
+    cut = raw.rfind(b"\n")   # keep the partial tail for next poll — cut in
+    if cut < 0:              # BYTES: the offset must never mix with a char
+        return after, after, [], reset    # index (multibyte text shifts it
+    chunk = raw[:cut].decode(errors="replace")   # mid-record → the tail re-)
+    return after + cut + 1, after, parse_msgs(chunk.splitlines()), reset
 
 
 def parse_msgs(lines):
@@ -1356,12 +1360,17 @@ let chatBusy = false;                    // one poll in flight — overlapping
 async function pollChat(force) {         // fetches double-append messages
   if (chatBusy || !chatPane || (!force && !document.getElementById('chat').classList.contains('on'))) return;
   chatBusy = true;
-  try {
+  const pane = chatPane;   // a switch mid-poll (drawer taps) must not land
+  try {                    // the OLD pane's messages in the NEW pane's chat
     let res;
-    try { res = await fetch(`/api/chat/${chatPane}?token=${token}&after=${chatOffset}`); }
+    try { res = await fetch(`/api/chat/${pane}?token=${token}&after=${chatOffset}`); }
     catch { return; }
     if (!res.ok) return;
     const d = await res.json();
+    if (pane !== chatPane) {   // stale response — the user switched; the
+      setTimeout(() => pollChat(true), 0);   // new pane's forced poll was
+      return;                  // busy-blocked, so refill it right away
+    }
     chkVer(d.ver);
     chatOffset = d.offset;
     if (chatHead < 0 && d.head != null) chatHead = d.head;
@@ -1369,11 +1378,18 @@ async function pollChat(force) {         // fetches double-append messages
     const box = document.getElementById('msgs');
     const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
     chatPinned = stick;
+    if (d.reset) {                       // the offset went stale — this poll
+      box.innerHTML = '';               // re-delivers the recent WINDOW; a
+      lastUser = { t: '', pu: '' };     // plain append would double it all.
+      ensureOlder();                    // start over from the canonical view
+    }
     for (const m of d.messages) {
       if (m.role === 'user') {
         const pend = [...box.querySelectorAll('.m.pending')]
           .find(el => el.textContent === m.text);
-        if (pend) { pend.classList.remove('pending'); continue; }  // adopted
+        if (pend) { pend.classList.remove('pending');
+                    box.appendChild(pend);   // the echo sat mid-stream; the
+                    continue; }              // recorded spot is chronological
       }
       if (m.role === 'compact')          // the card adopts the pending
         for (const el of                 // /compact chip; the chip itself
@@ -1499,8 +1515,12 @@ async function sendChat() {
   fitInp();
   delete drafts[chatPane];
   // optimistic echo: show the bubble NOW; the transcript poll adopts it
-  // (and flips it solid) once Claude records the message
-  const echo = addMsg({ role: 'user', ts: '', text });
+  // (and flips it solid) once Claude records the message. Collapse pastes
+  // with the SAME regex the server uses or the adoption text-match misses
+  const shown = text.replace(
+      /\s*<pasted_content[^>]*>[\s\S]*?(<\/pasted_content>\s*|$)/g,
+      "\n📎 粘贴内容").trim();
+  const echo = addMsg({ role: 'user', ts: '', text: shown });
   if (echo) echo.classList.add('pending');
   document.getElementById('chat-ico').textContent = '⚡';
   document.getElementById('chat-ico').style.color = META.running.c;
@@ -1798,7 +1818,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"head": head, "done": done,
                                             "messages": msgs}))
                 return
-            offset, head, msgs = read_chat(path, after)
+            offset, head, msgs, reset = read_chat(path, after)
             ctx, out, tmode = session_usage(path)
             screen = capture_tail(pane)          # one snapshot, two parsers
             model, pct = pane_ctx(screen)
@@ -1831,7 +1851,7 @@ class Handler(BaseHTTPRequestHandler):
                 if pend:            # not three mystery buttons
                     perm = dict(perm, tool=pend[0], what=pend[1])
             self._send(200, json.dumps({"offset": offset, "head": head,
-                                        "messages": msgs,
+                                        "messages": msgs, "reset": reset,
                                         "status": status, "wait": wait,
                                         "perm": perm,
                                         "usage": {"ctx": ctx, "out": out,

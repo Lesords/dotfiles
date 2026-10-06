@@ -81,9 +81,9 @@ def build_page():
         ("fetch(`/api/chat/${chatPane}?token=${token}&before=${chatHead}`)",
          "fetch(`/api/chat/${chatHost}/${chatPane}"
          "?token=${token}&before=${chatHead}`)", 1),
-        ("fetch(`/api/chat/${chatPane}?token=${token}&after=${chatOffset}`)",
-         "fetch(`/api/chat/${chatHost}/${chatPane}"
-         "?token=${token}&after=${chatOffset}`)", 1),
+        ("fetch(`/api/chat/${pane}?token=${token}&after=${chatOffset}`)",   # pollChat
+         "fetch(`/api/chat/${chatHost}/${pane}"        # captures `pane` for
+         "?token=${token}&after=${chatOffset}`)", 1),  # its race guard now
         ("fetch(`/api/send/${chatPane}?token=${token}`",
          "fetch(`/api/send/${chatHost}/${chatPane}?token=${token}`", 3),
         # hub identity in the page title — static and the JS-updated form
