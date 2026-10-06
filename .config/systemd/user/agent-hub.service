@@ -1,0 +1,10 @@
+[Unit]
+Description=agent-hub (LAN agent-server aggregator)
+After=agent-server.service
+
+[Service]
+ExecStart=%h/.local/sbin/agent-hub
+Restart=always
+
+[Install]
+WantedBy=default.target

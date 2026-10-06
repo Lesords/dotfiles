@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""agent-hub — one phone URL for every device's agent-server.
+
+The phone talks ONLY to the hub (its own token); the hub merges every
+registry node's /api/status and relays chat/preview/send requests to
+the owning node. Nodes are plain agent-server instances — the PC's own
+server is just the first registry entry, nothing special.
+
+The hub page is the agent-server PAGE with EXPLICIT patches (host
+badges, host-scoped API routes, no terminal button until the WS bridge
+exists). Every patch must match exactly its expected count or the hub
+REFUSES to start — page drift fails loudly, never silently.
+
+Phase 1+2: HTTP only. Phase 3 (WS terminal bridge) not built yet.
+Registry: ~/.config/agent-hub/nodes.json  [{name, url, token, readonly}]
+"""
+import hashlib
+import json
+import os
+import re
+import secrets
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PORT = 7680
+CFG = os.path.expanduser("~/.config/agent-hub")
+AGENT_SERVER = os.path.expanduser("~/.local/sbin/agent-server")
+
+
+# ---------- page: take agent-server's PAGE and patch it into a hub page ----
+def build_page():
+    src = open(AGENT_SERVER, encoding="utf-8").read()
+    a = src.index('PAGE = r"""') + len('PAGE = r"""')
+    b = src.index('"""', a)
+    page = src[a:b]
+    # (exact substring, replacement, expected occurrence count)
+    patches = [
+        # search/filter: match the node host, not the (always-claude) agent
+        ("(r.agent || '').toLowerCase().includes(q));",
+         "(r.host || '').toLowerCase().includes(q));", 2),
+        # group key: device · project — the drawer AND the home list
+        ("const g = r.project || '—';",
+         "const g = (r.host || '?') + ' · ' + (r.project || '—');", 2),
+        # row sub + drawer sub: the device name is the differentiator now
+        ('<div class="rsub">${esc(r.agent)} · ',
+         '<div class="rsub">${esc(r.host)} · ', 1),
+        ('<div class="s">${esc(r.agent)} · ',
+         '<div class="s">${esc(r.host)} · ', 1),
+        # phase 3 (WS bridge) not built — no terminal button on the hub
+        ('<span class="btns"><span data-a="eye">👁</span>'
+         '<span data-a="tty">⌨</span></span>',
+         '<span class="btns"><span data-a="eye">👁</span></span>', 1),
+        # pane ids (%12) collide across nodes — composite keys everywhere
+        ("toggle(r.pane, row); return;",
+         "toggle(r.host + '|' + r.pane, row); return;", 1),
+        ("if (open[r.pane]) attachPreview(r.pane, row);",
+         "if (open[r.host + '|' + r.pane])"
+         " attachPreview(r.host + '|' + r.pane, row);", 1),
+        ("async function attachPreview(pane, row) {",
+         "async function attachPreview(key, row) {\n"
+         "  const [host, pane] = key.split('|');", 1),
+        ("fetch(`/api/preview/${pane}?token=${token}`)",
+         "fetch(`/api/preview/${host}/${pane}?token=${token}`)", 1),
+        ("let chatPane = null, chatOffset = -1",
+         "let chatPane = null, chatHost = null, chatOffset = -1", 1),
+        ("chatPane = pane; chatOffset = -1;",
+         "chatPane = pane; chatHost = r.host; chatOffset = -1;", 1),
+        ("drafts[chatPane] = document.getElementById('chat-in').value;",
+         "drafts[chatHost + '|' + chatPane] =", 1),  # tail re-appended below
+        ("document.getElementById('chat-in').value = drafts[pane] || '';",
+         "document.getElementById('chat-in').value ="
+         " drafts[(r.host || '') + '|' + pane] || '';", 1),
+        ("delete drafts[chatPane];",
+         "delete drafts[chatHost + '|' + chatPane];", 1),
+        ("fetch(`/api/chat/${chatPane}?token=${token}&before=${chatHead}`)",
+         "fetch(`/api/chat/${chatHost}/${chatPane}"
+         "?token=${token}&before=${chatHead}`)", 1),
+        ("fetch(`/api/chat/${chatPane}?token=${token}&after=${chatOffset}`)",
+         "fetch(`/api/chat/${chatHost}/${chatPane}"
+         "?token=${token}&after=${chatOffset}`)", 1),
+        ("fetch(`/api/send/${chatPane}?token=${token}`",
+         "fetch(`/api/send/${chatHost}/${chatPane}?token=${token}`", 3),
+        # hub identity in the page title — static and the JS-updated form
+        ("<title>agents</title>", "<title>agent hub</title>", 1),
+        ("document.title = nWait ? `(${nWait}) agents ⏳` : 'agents';",
+         "document.title = nWait ? `(${nWait}) agent hub ⏳` : 'agent hub';", 1),
+        # node filter chips: one tap narrows the list to one device —
+        # typing a name in the search box was the only way before
+        ("</style></head><body>",
+         "#nrow { display:flex; gap:6px; padding:2px 0 6px;"
+         " margin:0 -4px; overflow-x:auto; }\n"   # body pads 14px, the fixed
+                                                   # topbar 10px — meet the 🔔
+         "  #dnrow { display:flex; gap:6px; padding:8px 12px 0;"
+         " flex:none; overflow-x:auto; }\n"       # the drawer's own chip row
+         "  #nrow .nchip, #dnrow .nchip { flex:none; font-size:12px;"
+         " color:#8a91b0;\n"
+         "                 padding:5px 12px; border:1px solid #2a2f45;\n"
+         "                 border-radius:12px; }\n"
+         "  #nrow .nchip.cur, #dnrow .nchip.cur { color:#cdd0e0;"
+         " border-color:#7c86ad;\n"
+         "                     background:#1a1f30; }\n"
+         "  </style></head><body>", 1),
+        ('  <span id="ping"></span>\n</div>',
+         '  <span id="ping"></span>\n</div>\n<div id="nrow" hidden></div>', 1),
+        ("const rows = lastRows.filter(r => !q ||",
+         "const rows = lastRows.filter(r => (!hostFilter ||"
+         " r.host === hostFilter) && (!q ||", 2),
+        ("(r.host || '').toLowerCase().includes(q));",
+         "(r.host || '').toLowerCase().includes(q)));", 2),
+        ('<div class="dhead"><span>agents</span><span id="dwait"></span></div>',
+         '<div class="dhead"><span>agents</span><span id="dwait"></span></div>'
+         '\n  <div id="dnrow" hidden></div>', 1),
+        ("function renderList() {",
+         "let hostFilter = '';                    // chips narrow list+drawer\n"
+         "function renderChips() {                // to ONE node; ONE state\n"
+         "  const hosts = [...new Set(lastRows.map(r => r.host || '?'))];\n"
+         "  const fill = id => {                  // update chips IN PLACE: a\n"
+         "    const nrow = document.getElementById(id);   // rebuild detaches\n"
+         "    if (hosts.length < 2) { nrow.innerHTML = ''; nrow.hidden = true;"
+         " return; }      // the tapped chip mid-click; click-away then\n"
+         "    nrow.hidden = false;                // reads it as an outside tap\n"
+         "    const want = [{ l: '全部 ' + lastRows.length, v: '' }];   // and\n"
+         "    for (const h of hosts)              // closes the drawer\n"
+         "      want.push({ l: h + ' ' + lastRows.filter(r =>\n"
+         "        (r.host || '?') === h).length, v: h });\n"
+         "    while (nrow.children.length > want.length)\n"
+         "      nrow.lastChild.remove();\n"
+         "    want.forEach((w, i) => {\n"
+         "      let c = nrow.children[i];\n"
+         "      if (!c) {\n"
+         "        c = document.createElement('span');\n"
+         "        c.onclick = () => {\n"
+         "          hostFilter = hostFilter === w.v ? '' : w.v;\n"
+         "          renderList();\n"
+         "          if (document.getElementById('drawer')"
+         ".classList.contains('on'))\n"
+         "            renderDrawer(); };\n"
+         "        nrow.appendChild(c);\n"
+         "      }\n"
+         "      c.textContent = w.l;\n"
+         "      c.className = 'nchip' + (hostFilter === w.v ? ' cur' : '');\n"
+         "    });\n"
+         "  };\n"
+         "  fill('nrow'); fill('dnrow');\n"
+         "}\n"
+         "function renderList() { renderChips();", 1),
+    ]
+    for old, new, want in patches:
+        got = page.count(old)
+        if got != want:
+            sys.exit(f"page patch mismatch ({got} != {want}): {old[:60]!r}")
+        page = page.replace(old, new)
+    # the drafts write patch above replaced a longer line — restore its tail
+    page = page.replace(
+        "drafts[chatHost + '|' + chatPane] =",
+        "drafts[chatHost + '|' + chatPane] ="
+        " document.getElementById('chat-in').value;", 1)
+    ver = hashlib.md5(page.encode()).hexdigest()[:8]
+    return page.replace("__VER__", ver), ver
+
+
+# ---------- registry --------------------------------------------------------
+def load_nodes():
+    path = os.path.join(CFG, "nodes.json")
+    if not os.path.exists(path):
+        try:
+            local_token = open(os.path.expanduser(
+                "~/.config/agent-server/token")).read().strip()
+        except OSError:
+            local_token = ""
+        nodes = [{"name": socket.gethostname(),
+                  "url": "http://127.0.0.1:7678", "token": local_token}]
+        json.dump(nodes, open(path, "w"), indent=1)
+        return nodes
+    return json.load(open(path))
+
+
+def node_fetch(node, path_q, method="GET", body=None, timeout=2.0):
+    """One HTTP call to a node; returns (status, content_type, body_bytes)."""
+    req = urllib.request.Request(node["url"] + path_q, method=method,
+                                 data=body)
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read(), \
+                int((time.time() - t0) * 1000)
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type", ""), e.read(), \
+            int((time.time() - t0) * 1000)
+    except Exception as e:                      # node down / timeout
+        return 0, "", str(e).encode(), int((time.time() - t0) * 1000)
+
+
+PAGE, VER = build_page()
+
+
+# ---------- merged status ---------------------------------------------------
+def merged_status():
+    nodes = load_nodes()
+    agents, states = [], []
+
+    def grab(node):
+        st, _ct, body, ms = node_fetch(
+            node, f"/api/status?token={node['token']}")
+        if st != 200:
+            states.append({"name": node["name"], "ok": False, "ms": ms})
+            return
+        try:
+            rows = json.loads(body.decode()).get("agents") or []
+        except ValueError:
+            states.append({"name": node["name"], "ok": False, "ms": ms})
+            return
+        for r in rows:
+            r["host"] = node["name"]           # the hub's own dimension
+        agents.extend(rows)
+        states.append({"name": node["name"], "ok": True, "ms": ms})
+
+    threads = [threading.Thread(target=grab, args=(n,)) for n in nodes]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(3)
+    return {"agents": agents, "nodes": states, "ver": VER}
+
+
+# ---------- HTTP ------------------------------------------------------------
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _send(self, code, body, ctype="application/json"):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authed(self, q):
+        return q.get("token", [""])[0] == TOKEN
+
+    def do_GET(self):
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        if not self._authed(q):
+            return self._send(403, b'{"error":"bad token"}')
+        if u.path == "/" or u.path == "":
+            return self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+        if u.path == "/api/status":
+            return self._send(200, json.dumps(merged_status()).encode())
+        m = re.match(r"^/api/(chat|preview|send)/([^/]+)/(.+)$", u.path)
+        if m:
+            return self._relay(m, q)
+        self._send(404, b'{"error":"not found"}')
+
+    def do_POST(self):
+        self.do_GET()
+
+    def _relay(self, m, q):
+        kind, name, rest = m.group(1), m.group(2), m.group(3)
+        node = next((n for n in load_nodes() if n["name"] == name), None)
+        if not node:
+            return self._send(404, b'{"error":"no such node"}')
+        extra = "&".join(f"{k}={v[0]}" for k, v in q.items()
+                         if k != "token")
+        target = f"/api/{kind}/{rest}?token={node['token']}"
+        if extra:
+            target += "&" + extra
+        body = None
+        if self.headers.get("Content-Length"):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+        st, ct, out, _ms = node_fetch(
+            node, target, method="POST" if body else "GET", body=body,
+            timeout=15 if kind == "chat" else 5)
+        if kind == "chat":                     # the page hot-reloads on VER —
+            try:                               # relayed node VERs would loop;
+                d = json.loads(out.decode())   # the hub page runs on OUR ver
+                d["ver"] = VER
+                out = json.dumps(d).encode()
+            except ValueError:
+                pass
+        if st == 0:
+            return self._send(502, b'{"error":"node unreachable"}')
+        self._send(st, out, ct or "application/json")
+
+    def log_message(self, *_):
+        pass
+
+
+class QuietHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        """Browsers RST keep-alive sockets all the time (reload, tab close,
+        speculative preconnects, phone network switches) — the default
+        traceback-per-reset spams the journal for a non-event."""
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError,
+                            ConnectionAbortedError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
+if __name__ == "__main__":
+    os.makedirs(CFG, exist_ok=True)
+    tok_file = os.path.join(CFG, "token")
+    if not os.path.exists(tok_file):
+        open(tok_file, "w").write(secrets.token_hex(16))
+    TOKEN = open(tok_file).read().strip()
+    load_nodes()                              # bootstrap nodes.json
+    srv = QuietHTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"agent-hub on :{PORT}, {len(load_nodes())} node(s)", flush=True)
+    srv.serve_forever()
