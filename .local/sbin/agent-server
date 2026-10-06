@@ -1285,8 +1285,14 @@ function renderDrawer() {
       d.innerHTML = `<span class="ico" style="color:${m.c}">${m.i}</span>` +
         `<div class="dn"><div class="t">${esc(r.title || r.window)}</div>` +
         `<div class="s">${esc(r.agent)} · ${esc(r.project)}${r.age ? ' · ' + r.age : ''}</div></div>`;
-      d.onclick = () => { toggleDrawer(false);
-                          if (r.pane !== chatPane) openChat(r.pane, r); };
+      d.onclick = () => {   // phone overlay closes on switch; the wide-screen
+        if (!matchMedia('(min-width:768px)').matches)  // drawer is a panel
+          toggleDrawer(false);                         // — keep it open
+        if (r.pane !== chatPane) {
+          openChat(r.pane, r);
+          if (document.getElementById('drawer').classList.contains('on'))
+            renderDrawer();             // move the ● highlight immediately
+        } };
       box.appendChild(d);
     }
   }

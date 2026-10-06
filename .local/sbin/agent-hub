@@ -116,6 +116,10 @@ def build_page():
         ('<div class="dhead"><span>agents</span><span id="dwait"></span></div>',
          '<div class="dhead"><span>agents</span><span id="dwait"></span></div>'
          '\n  <div id="dnrow" hidden></div>', 1),
+        # pane ids collide across nodes — the drawer's switch guard must
+        # compare host+pane or a same-id row on another device looks current
+        ("if (r.pane !== chatPane) {",
+         "if ((r.host + '|' + r.pane) !== (chatHost + '|' + chatPane)) {", 1),
         ("function renderList() {",
          "let hostFilter = '';                    // chips narrow list+drawer\n"
          "function renderChips() {                // to ONE node; ONE state\n"
