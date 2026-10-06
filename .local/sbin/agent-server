@@ -928,7 +928,10 @@ PAGE = r"""<!doctype html>
                                background:#2c2027; }
   #cmds { display:flex; align-items:center; gap:6px; padding:0 2px; }
   #cmds span { flex:none; font-size:12px; color:#8a91b0; padding:5px 12px;
-               border:1px solid #2a2f45; border-radius:12px; }
+               border:1px solid #2a2f45; border-radius:12px;
+               max-width:32vw; overflow:hidden; text-overflow:ellipsis;
+               white-space:nowrap; }   // unknown long mode names degrade to
+                                       // an ellipsis, never a row overflow
   .m.cmd { margin:6px auto; max-width:none; background:none; color:#5b6280;
            font-size:12px; border:1px solid #1e2130; border-radius:12px;
            padding:4px 12px; white-space:normal; }
@@ -1051,6 +1054,9 @@ const META = {
   background: { i:'🌙', c:'#6c7086', n:2 },
   idle:       { i:'💤', c:'#a6e3a1', n:3 },
 };
+const MODE2 = { 'accept edits': 'edits', plan: 'plan', auto: 'auto',
+                bypass: 'bypass', manual: 'ask' };  // raw names overflow the
+// phone's one-line chip row; the ellipsis guard covers the rest
 const open = {};
 let lastRowsSig = '';
 let term = null, fit = null, ws = null, ctrlArmed = false;
@@ -1377,7 +1383,7 @@ async function pollChat(force) {         // fetches double-append messages
       chip.style.color = d.usage.pct >= 85 ? '#f38ba8'
                        : d.usage.pct >= 50 ? '#f9e2af' : '#a6e3a1';
       document.getElementById('modec').textContent =
-        '⇄ ' + (d.usage.mode || '—');
+        '⇄ ' + (MODE2[d.usage.mode] || d.usage.mode || '—');
       document.getElementById('ctxd').textContent =
         [d.usage.model, `ctx ${fmtTok(d.usage.ctx ?? 0)}`,
          `输出 ${fmtTok(d.usage.out ?? 0)}`].filter(Boolean).join(' · ');
