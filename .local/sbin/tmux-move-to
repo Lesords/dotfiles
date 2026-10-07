@@ -1,0 +1,115 @@
+#!/bin/bash
+# tmux-move-to: 把当前 pane/窗口移到别的 session/window
+# prefix C-m → 目的地 menu: ▸ 行 = move-window(整窗), ↩/› 行 = move-pane(当前 pane)
+# 源 = 触发时的当前 pane; floax-* session 以 popup 打开而非 client 跳转
+
+SELF="$HOME/.local/sbin/tmux-move-to"
+stage="${1:-start}"
+
+msg() { tmux display-message "tmux-move-to: $*"; }
+
+cleanup() {
+  tmux set -g -u @mt_menu 2>/dev/null
+}
+
+# 源 session 消亡后 client 有一小段悬空期, 重试兜住
+switch_to() {
+  for _ in 1 2 3; do
+    tmux switch-client -t "$1" 2>/dev/null && return
+    sleep 0.2
+  done
+}
+
+# 名字走 -e 环境变量(argv 直达, 不穿 shell 解析); popup 阻塞, 需后台化
+popup_to() {
+  local w h
+  w=$(tmux showenv -g FLOAX_WIDTH  | cut -d= -f2)
+  h=$(tmux showenv -g FLOAX_HEIGHT | cut -d= -f2)
+  tmux popup -w "$w" -h "$h" -e "MT_POP=$1" \
+    -E 'tmux attach-session -t "$MT_POP"' 2>/dev/null &
+}
+
+case "$stage" in
+  start)
+    cleanup
+    cur_sess=$(tmux display -p '#{session_name}')
+    cur_win=$(tmux display -p '#{window_id}')
+    src_desc=$(tmux display -p '#{window_name}/#{pane_current_command}')
+    snap=""
+    items=()
+    keys="123456789""abcdefghijklmnop""rstuvwxyz"   # q 留给「取消」
+    idx=0
+
+    add() {  # add <label> <快照行>; 键用尽后静默截断
+      local k="${keys:$idx:1}"
+      if [ -z "$k" ]; then return 0; fi
+      items+=("$1" "$k" "run-shell \"$SELF tgt $idx\"")
+      snap+="$2"$'\n'
+      idx=$((idx+1))
+    }
+
+    # 快照: mode \t move目标 \t 预切pane \t 目标session; 分隔用 tab(名字可含空格)
+    WFMT=$'#{window_id}\t#{window_index}\t#{window_name}\t#{window_panes}\t#{pane_id}'
+    addwins() {  # addwins <session> <label前缀> [skip-cur]
+      while IFS=$'\t' read -r wid _ wname wpanes papid; do
+        if [ "$3" ] && [ "$wid" = "$cur_win" ]; then continue; fi
+        if [ "$wpanes" -gt 1 ]; then pl=" ($wpanes panes)"; else pl=""; fi
+        add "$2$1 › $wname$pl" "P"$'\t'"$wid"$'\t'"$papid"$'\t'"$1"
+      done < <(tmux list-windows -t "=$1" -F "$WFMT")
+    }
+
+    addwins "$cur_sess" "↩ " skip-cur
+    while IFS=$'\t' read -r sname spapid; do
+      if [ "$sname" = "$cur_sess" ]; then continue; fi
+      add "$sname ▸ 整窗" "W"$'\t'"=$sname:"$'\t'"$spapid"$'\t'"$sname"
+      addwins "$sname" "  "
+    done < <(tmux list-sessions -F $'#{session_name}\t#{pane_id}' | LC_ALL=C sort)
+
+    if [ "$idx" -eq 0 ]; then
+      msg "没有可去的目的地"
+      exit 0
+    fi
+    tmux set -g @mt_menu "$snap"
+    tmux display-menu -T " 移动 [$cur_sess] $src_desc → ? " -x C -y C \
+      "${items[@]}" "取消" q ""
+    ;;
+
+  tgt)
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) ;;
+      *) line=$(tmux show -gv @mt_menu 2>/dev/null | sed -n "$((${2}+1))p") ;;
+    esac
+    IFS=$'\t' read -r mode target pret tsess <<< "$line"
+    if [ -z "$line" ]; then
+      msg "目的地快照缺失, 请重新触发"
+      cleanup
+      exit 0
+    fi
+    case "$(tmux display -p '#{session_name}')" in floax-*) in_floax=1 ;; esac
+    case "$tsess" in floax-*) to_floax=1 ;; esac
+    if [ "$mode" = W ]; then
+      src=$(tmux display -p '#{window_id}')
+      mv=move-window
+    else
+      src=$(tmux display -p '#{pane_id}')
+      mv=move-pane
+    fi
+    # popup 内触发不切走; 目标是 floax 也不预切(move 后弹 popup, client 留原地)
+    if [ -z "$in_floax" ] && [ -z "$to_floax" ]; then
+      switch_to "$pret"
+    fi
+    if err=$(tmux "$mv" -s "$src" -t "$target" 2>&1); then
+      if [ -z "$in_floax" ]; then
+        if [ -n "$to_floax" ]; then
+          popup_to "$tsess"
+        elif [ "$mv" = move-pane ]; then
+          switch_to "$src"
+        fi
+      fi
+    else
+      msg "移动失败: $err"
+    fi
+    cleanup
+    ;;
+esac
