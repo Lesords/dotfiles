@@ -1,6 +1,12 @@
 // agent-rofi picker — inherits mine.rasi (One Dark)
 @import "mine.rasi"
 
+// dual-width by design: CJK advance is exactly 2× ASCII, which the
+// space-padded columns need (JetBrainsMono has no CJK). Scoped here.
+* {
+    font: "Noto Sans Mono CJK SC 12.5";
+}
+
 // rows lead with an inline status glyph, not a 30px icon: drop the empty
 // icon slot and pull the text padding in
 element-icon {

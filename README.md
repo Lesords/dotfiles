@@ -41,6 +41,9 @@ sudo apt install dunst
 
 # flameshot
 sudo apt install flameshot
+
+# dual-width mono font — the agent picker's space-padded columns need it
+sudo apt install fonts-noto-cjk
 ```
 
 Fedora
@@ -66,6 +69,9 @@ sudo dnf install flameshot -y
 
 # playerctl
 sudo dnf install playerctl
+
+# dual-width mono font — the agent picker's space-padded columns need it
+sudo dnf install default-fonts-cjk-mono
 ```
 
 ## Manual
