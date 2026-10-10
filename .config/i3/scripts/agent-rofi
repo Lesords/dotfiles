@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # agent-rofi — desktop agent picker: list agents (@pane_* from
-# tmux-agent-sidebar), Enter retunes the terminal surface you're looking at.
+# tmux-agent-sidebar), Enter jumps to the agent: prefer a surface already
+# attached to its session (raise that), else retune the one you're looking at.
 #   agent-rofi --dry-run  print rows + jump targets, no rofi
 set -u
 # AGENT_ROFI_DEBUG=1 → xtrace to /tmp/agent-rofi-debug.log
@@ -72,40 +73,111 @@ jump() { tmux switch-client -c "$1" -t "$sess" \; select-window -t "$pane" \; se
 raise() { [ -n "$1" ] && i3-msg "[id=$1] focus" >/dev/null 2>&1; }
 wxid()  { i3-msg -t get_tree 2>/dev/null |
   jq -r '.. | select(.window_properties?.class? == "org.wezfurlong.wezterm") | .window' | head -1; }
+# wezterm's window that currently holds its GUI focus (X-focus driven)
+fwid_of() {
+  local pf
+  pf=$(wezterm cli --no-auto-start list-clients --format json 2>/dev/null |
+    jq -r '.[0].focused_pane_id // empty')
+  printf '%s' "$wjson" |
+    jq -r --argjson p "${pf:-0}" '.[] | select(.pane_id == $p) | .window_id // empty' 2>/dev/null | head -1
+}
+# internal wezterm window_id → X id. wezterm's CLI exposes no X ids, but
+# both id spaces are creation-ordered and each wezterm window owns exactly
+# one X window (created and destroyed together) — zipping the two sorted
+# lists pairs them for any number of windows. Counts disagree (stray
+# same-class window / second GUI instance) → no mapping, caller probes.
+wxmap() {
+  local a b
+  a=$(printf '%s' "$wjson" | jq -r '[.[].window_id] | unique | .[]' 2>/dev/null)
+  b=$(i3-msg -t get_tree 2>/dev/null |
+    jq -r '[.. | objects | select(.window_properties?.class? == "org.wezfurlong.wezterm") | .window] | sort | .[]')
+  [ "$(printf '%s\n' "$a" | grep -c .)" = "$(printf '%s\n' "$b" | grep -c .)" ] || return 1
+  paste <(printf '%s\n' "$a") <(printf '%s\n' "$b") | awk -v w="$1" '$1 == w {print $2; exit}'
+}
 wjson=$(wezterm cli --no-auto-start list --format json 2>/dev/null)
 
-# Preferred: the focused window's X title names the visible tab ("[k/m] T",
-# or "T" for single-tab) — retune that tab's client in place, no raise.
-xtitle=$(i3-msg -t get_tree 2>/dev/null |
-  jq -r '.. | select(.focused? == true and .window_properties?.class? == "org.wezfurlong.wezterm") | .name' | head -1)
-ftab=$xtitle; fk=0; fm=0
-[[ $xtitle =~ ^\[([0-9]+)/([0-9]+)\]\ (.*)$ ]] && { fk=${BASH_REMATCH[1]}; fm=${BASH_REMATCH[2]}; ftab=${BASH_REMATCH[3]}; }
-while IFS= read -r t; do
-  tmux list-clients -F '#{client_name}' 2>/dev/null | grep -qx "$t" && { jump "$t"; exit 0; }
-done < <(printf '%s' "$wjson" | jq -r --arg t "$ftab" --argjson k "$fk" --argjson m "$fm" '
-  group_by(.window_id)[] | . as $w
-  | select($m == 0 or (($w | length) == $m and $w[($k - 1)].title == $t))
-  | (if $m == 0 then $w[] | select(.title == $t) else $w[($k - 1)] end) | .tty_name')
+# activate the wezterm tab whose pane runs tmux client $1, and raise its
+# window by exact X id via wxmap's creation-order pairing — no titles, no
+# probing, any number of windows. The raise is verified through wezterm's
+# own focus report; on mismatch (or when wxmap declines) fall back to the
+# focus probe, which may briefly flash a wrong window. Target IS the
+# focused window → the tab switch alone is enough.
+surface() {
+  local pane="" wid="" x=""
+  local -a cands=()
+  read -r pane wid < <(printf '%s' "$wjson" |
+    jq -r --arg t "$1" '.[] | select(.tty_name == $t) | "\(.pane_id) \(.window_id)"' 2>/dev/null | head -1)
+  [ -n "$pane" ] && wezterm cli --no-auto-start activate-pane --pane-id "$pane" >/dev/null 2>&1
+  [ -n "$fxid" ] && [ "$wid" = "$lwid" ] && return 0   # your own window: done
+  [ -n "$wid" ] || { raise "$(wxid)"; return 0; }
+  x=$(wxmap "$wid")
+  if [ -n "$x" ]; then
+    raise "$x"; sleep 0.12   # let wezterm register the X focus
+    [ "$(fwid_of)" = "$wid" ] && return 0
+  fi
+  # probe: focus each candidate in turn, ask wezterm which pane received it
+  mapfile -t cands < <(i3-msg -t get_tree 2>/dev/null |
+    jq -r '.. | objects | select(.window_properties?.class? == "org.wezfurlong.wezterm") | .window')
+  for x in "${cands[@]}"; do
+    raise "$x"
+    for _ in 1 2; do
+      sleep 0.12
+      [ "$(fwid_of)" = "$wid" ] && return 0
+    done
+  done
+  # nothing confirmed — the last candidate stays raised
+}
 
-# Fallback: most recently active client; activate its tab, raise by exact
-# "[k/m] title" anchor (X title sync can lag, hence the retries).
-client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null |
+# wezterm's GUI focus: list-clients names the pane you last touched — that
+# stays valid even while X focus sits in another app (chrome), which is
+# exactly when "where was I" matters. ltty/lwid: that surface's tty /
+# internal window id. ftty: the surface you're LOOKING at — only when a
+# wezterm window truly holds X focus (fxid). A last-touched tab may not be
+# a tmux client (ssh / plain shell) → ltty empty. .[0] = single GUI.
+ltty=""; lwid=""; ftty=""; fxid=""
+fpane=$(wezterm cli --no-auto-start list-clients --format json 2>/dev/null |
+  jq -r '.[0].focused_pane_id // empty')
+if [ -n "$fpane" ]; then
+  read -r ltty lwid < <(printf '%s' "$wjson" | jq -r --argjson p "$fpane" '
+    .[] | select(.pane_id == $p) | "\(.tty_name // "-") \(.window_id)"' 2>/dev/null | head -1)
+fi
+tmux list-clients -F '#{client_name}' 2>/dev/null | grep -qx "$ltty" || ltty=""
+fxid=$(i3-msg -t get_tree 2>/dev/null | jq -r '
+  .. | select(.focused? == true and .window_properties?.class? == "org.wezfurlong.wezterm") | .window // empty' | head -1)
+[ -n "$fxid" ] && ftty=$ltty
+
+# local surfaces only: ttys that belong to a wezterm pane (remote ssh
+# attachés have none and can't be raised anyway)
+wtty=""
+[ -n "$wjson" ] && wtty=$(printf '%s' "$wjson" |
+  jq -r '[.[].tty_name // empty] | join("|")' 2>/dev/null)
+
+# Landing ladder — never steal a surface's session when a surface already
+# shows the agent's session:
+# ① you're looking at that session right now → select window/pane in place
+if [ -n "$ftty" ] && [ "$(tmux display-message -p -t "$ftty" '#{session_name}' 2>/dev/null)" = "$sess" ]; then
+  jump "$ftty"; exit 0
+fi
+# ② a local surface is already attached to it → go there (switch-client
+# re-selects the session it already shows: no-op anchor for the selects);
+# several surfaces share the session → the one you last touched wins over
+# bare activity — "where I was just working" beats a timestamp
+att=""
+[ -n "$wtty" ] && att=$(tmux list-clients -t "$sess" -F '#{client_activity} #{client_name}' 2>/dev/null |
+  awk -v p="|$wtty|" -v f="$ltty" 'index(p, "|" $2 "|") {print ($2==f ? 2 : 1), $1, $2}' |
+  sort -rn | head -1 | cut -d' ' -f3)
+if [ -n "$att" ]; then
+  jump "$att"; surface "$att"; exit 0
+fi
+# ③ nobody local shows it → retune the surface you're looking at
+[ -n "$ftty" ] && { jump "$ftty"; exit 0; }
+
+# invoked from a non-tmux surface (ssh tab / other app): retune the most
+# recently active local client and raise it; wezterm down → any client
+client=""
+[ -n "$wtty" ] && client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null |
+  awk -v p="|$wtty|" 'index(p, "|" $2 "|")' | sort -rn | head -1 | cut -d' ' -f2)
+[ -n "$client" ] || client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null |
   sort -rn | head -1 | cut -d' ' -f2)
 [ -n "$client" ] || exit 0
-read -r wpane wregex < <(printf '%s' "$wjson" | jq -r --arg t "$client" '
-  group_by(.window_id)[] | . as $w | ($w[] | select(.tty_name == $t)) as $p
-  | ($w | length) as $m | ($w | map(.tab_id) | index($p.tab_id) + 1) as $k
-  | "\($p.pane_id) " + (if $m == 1 then "^\($p.title)$"
-      else "^\\[\($k)/\($m)\\] \($p.title)$" end)')
-out=""
-if [ -n "$wpane" ]; then
-  wezterm cli --no-auto-start activate-pane --pane-id "$wpane" >/dev/null 2>&1
-  for _ in 1 2 3; do
-    sleep 0.2
-    out=$(i3-msg "[class=\"org.wezfurlong.wezterm\" title=\"${wregex}\"] focus" 2>/dev/null)
-    [[ "$out" == *'"success":true'* ]] && break   # [[ == ]] globs; [ = ] doesn't
-    out=""
-  done
-fi
-[ -n "$out" ] || raise "$(wxid)"
-jump "$client"
+jump "$client"; surface "$client"
