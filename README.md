@@ -256,7 +256,7 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Ctrl + Shift + e | Click URL with keyboard  |
 | Ctrl + Shift + u | Input unicode character  |
 
-## Agent services
+# Agent services
 
 | Service | Port | Purpose |
 |---|---|---|
@@ -288,6 +288,6 @@ poll, no restart needed):
  {"name": "board",   "url": "http://192.168.1.78:7678", "token": "..."}]
 ```
 
-## Neovim
+# Neovim
 
 [nvim](./.config/nvim/README.md)
