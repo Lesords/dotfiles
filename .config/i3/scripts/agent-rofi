@@ -171,6 +171,74 @@ wxmap() {
   [ "$(printf '%s\n' "$a" | grep -c .)" = "$(printf '%s\n' "$b" | grep -c .)" ] || return 1
   paste <(printf '%s\n' "$a") <(printf '%s\n' "$b") | awk -v w="$1" '$1 == w {print $2; exit}'
 }
+
+# ancestor pid whose comm matches the anchored regex $2, walking /proc
+# PPid links (tmux comms contain spaces, so /proc/stat field arithmetic is
+# off-limits). Regex, not a literal: konsole may live under an alias —
+# Debian's x-terminal-emulator truncates its comm to "x-terminal-emul".
+anc_pid() {
+  local cur=$1 c
+  while [ -n "$cur" ] && [ "$cur" != 1 ] && [ "$cur" != 0 ]; do
+    read -r c < /proc/$cur/comm 2>/dev/null && [[ "$c" =~ ^$2$ ]] && { echo "$cur"; return 0; }
+    cur=$(awk '/^PPid:/{print $2}' /proc/$cur/status 2>/dev/null)
+  done
+  return 1
+}
+
+# konsole driver — the one non-wezterm surface driven end to end: DBus maps
+# each tab to its foreground pid (→ tty) and switches tabs; _NET_WM_PID maps
+# the process to its X window. Quirk: setCurrentSession only takes effect
+# while the window is focused — always raise first, switch after.
+konsole_xid() {  # konsole pid → X id of its window ("" when none found)
+  local x
+  for x in $(i3-msg -t get_tree 2>/dev/null |
+    jq -r '.. | objects | select((.window_properties?.class? // "") == "konsole") | .window'); do
+    [ "$(xprop -id "$x" _NET_WM_PID 2>/dev/null | grep -o '[0-9]*$')" = "$1" ] && { echo "$x"; return 0; }
+  done
+  return 1
+}
+konsole_ftty() {  # X id → tty of the ACTIVE tab's foreground process
+  command -v qdbus >/dev/null 2>&1 || return 1
+  local pid svc w cs fg
+  pid=$(xprop -id "$1" _NET_WM_PID 2>/dev/null | grep -o '[0-9]*$')
+  [ -n "$pid" ] && qdbus org.kde.konsole-$pid >/dev/null 2>&1 || return 1
+  svc=org.kde.konsole-$pid
+  for w in $(qdbus "$svc" 2>/dev/null | awk '/^\/Windows\//{print}'); do
+    cs=$(qdbus "$svc" "$w" currentSession 2>/dev/null) || continue
+    fg=$(qdbus "$svc" "/Sessions/$cs" foregroundProcessId 2>/dev/null)
+    if [ -n "$fg" ] && [ "$fg" != 0 ]; then
+      ps -o tty= -p "$fg" 2>/dev/null | tr -d ' ' | sed 's|^|/dev/|'; return 0
+    fi
+  done
+  return 1
+}
+konsole_surface() {  # raise the konsole window running tmux client tty $1,
+  # then switch to that client's tab. setCurrentSession silently no-ops
+  # until the window is truly focused and the raise is asynchronous — so
+  # verify the switch took and retry instead of racing it.
+  command -v qdbus >/dev/null 2>&1 || return 1
+  local cp kpid svc w sid fg x i
+  cp=$(tmux list-clients -F '#{client_name} #{client_pid}' 2>/dev/null |
+    awk -v t="$1" '$1 == t {print $2; exit}')
+  [ -n "$cp" ] || return 1
+  kpid=$(anc_pid "$cp" 'konsole|x-terminal-emul') || return 1
+  svc=org.kde.konsole-$kpid
+  qdbus "$svc" >/dev/null 2>&1 || return 1
+  for w in $(qdbus "$svc" 2>/dev/null | awk '/^\/Windows\//{print}'); do
+    for sid in $(qdbus "$svc" "$w" sessionList 2>/dev/null | tr -d '(),'); do
+      fg=$(qdbus "$svc" "/Sessions/$sid" foregroundProcessId 2>/dev/null)
+      [ "$fg" = "$cp" ] || continue
+      x=$(konsole_xid "$kpid") && raise "$x"
+      for i in 1 2 3; do
+        sleep 0.15   # let the X focus land before asking for a tab switch
+        qdbus "$svc" "$w" setCurrentSession "$sid" >/dev/null 2>&1
+        [ "$(qdbus "$svc" "$w" currentSession 2>/dev/null)" = "$sid" ] && return 0
+      done
+      return 0
+    done
+  done
+  return 1
+}
 wjson=$(wezterm cli --no-auto-start list --format json 2>/dev/null)
 
 # activate the tab running tmux client $1 and raise its window via wxmap's
@@ -182,8 +250,11 @@ surface() {
   local -a cands=()
   read -r pane wid < <(printf '%s' "$wjson" |
     jq -r --arg t "$1" '.[] | select(.tty_name == $t) | "\(.pane_id) \(.window_id)"' 2>/dev/null | head -1)
+  if [ -z "$wid" ]; then    # not a wezterm surface → konsole driver
+    konsole_surface "$1"; return $?
+  fi
   [ -n "$pane" ] && wezterm cli --no-auto-start activate-pane --pane-id "$pane" >/dev/null 2>&1
-  [ -n "$fxid" ] && [ "$wid" = "$lwid" ] && return 0   # your own window: done
+  [ "$fcls" = "org.wezfurlong.wezterm" ] && [ "$wid" = "$lwid" ] && return 0   # your own window: done
   [ -n "$wid" ] || { raise "$(wxid)"; return 0; }
   x=$(wxmap "$wid")
   if [ -n "$x" ]; then
@@ -204,10 +275,11 @@ surface() {
 }
 
 # ltty/lwid: tty + internal window of the pane you last touched — wezterm
-# remembers it even while X focus is elsewhere. ftty: the same surface, but
-# only when a wezterm window truly holds X focus (fxid). A last-touched tab
-# may not be a tmux client (ssh / plain shell). .[0] = single GUI instance.
-ltty=""; lwid=""; ftty=""; fxid=""
+# remembers it even while X focus is elsewhere. ftty: what you're LOOKING
+# at — wezterm's pane report when wezterm holds X focus, konsole's active
+# tab (DBus) when konsole does. Neither is guaranteed to be a tmux client.
+# .[0] = single GUI instance.
+ltty=""; lwid=""; ftty=""; fxid=""; fcls=""
 fpane=$(wezterm cli --no-auto-start list-clients --format json 2>/dev/null |
   jq -r '.[0].focused_pane_id // empty')
 if [ -n "$fpane" ]; then
@@ -215,18 +287,28 @@ if [ -n "$fpane" ]; then
     .[] | select(.pane_id == $p) | "\(.tty_name // "-") \(.window_id)"' 2>/dev/null | head -1)
 fi
 tmux list-clients -F '#{client_name}' 2>/dev/null | grep -qx "$ltty" || ltty=""
-fxid=$(i3-msg -t get_tree 2>/dev/null | jq -r '
-  .. | select(.focused? == true and .window_properties?.class? == "org.wezfurlong.wezterm") | .window // empty' | head -1)
-[ -n "$fxid" ] && ftty=$ltty
+read -r fcls fxid < <(i3-msg -t get_tree 2>/dev/null | jq -r '
+  [.. | objects | select(.focused? == true and .window != null) |
+   "\(.window_properties.class // "-") \(.window)"][0] // "- -"')
+if [ "$fcls" = "org.wezfurlong.wezterm" ]; then
+  ftty=$ltty
+elif [ "$fcls" = "konsole" ] && [ -n "$fxid" ]; then
+  ftty=$(konsole_ftty "$fxid")
+fi
+tmux list-clients -F '#{client_name}' 2>/dev/null | grep -qx "$ftty" || ftty=""
 
-# local surfaces only: ttys that belong to a wezterm pane (remote ssh
-# attachés have none and can't be raised anyway)
-wtty=""
-[ -n "$wjson" ] && wtty=$(printf '%s' "$wjson" |
-  jq -r '[.[].tty_name // empty] | join("|")' 2>/dev/null)
+# local jump targets: every attached client that is not an sshd or
+# mosh-server descendant — remote attaches retune views nobody looks at.
+# wezterm-ness only gates the raise machinery now.
+lcl=""
+while IFS= read -r c; do
+  pid=${c%% *}; tty=${c##* }
+  if ! anc_pid "$pid" sshd >/dev/null && ! anc_pid "$pid" mosh-server >/dev/null; then
+    lcl+="${lcl:+|}$tty"
+  fi
+done < <(tmux list-clients -F '#{client_pid} #{client_name}' 2>/dev/null)
 
-# Landing ladder — never steal a surface's session when a surface already
-# shows the agent's session:
+# Landing ladder — never steal a surface's session when one already shows it:
 # ① you're looking at that session right now → select window/pane in place
 if [ -n "$ftty" ] && [ "$(tmux display-message -p -t "$ftty" '#{session_name}' 2>/dev/null)" = "$sess" ]; then
   jump "$ftty"; exit 0
@@ -235,8 +317,8 @@ fi
 # session → the one you last touched wins (switch-client re-selects the
 # session it already shows: a no-op anchor for the selects)
 att=""
-[ -n "$wtty" ] && att=$(tmux list-clients -t "$sess" -F '#{client_activity} #{client_name}' 2>/dev/null |
-  awk -v p="|$wtty|" -v f="$ltty" 'index(p, "|" $2 "|") {print ($2==f ? 2 : 1), $1, $2}' |
+[ -n "$lcl" ] && att=$(tmux list-clients -t "$sess" -F '#{client_activity} #{client_name}' 2>/dev/null |
+  awk -v p="|$lcl|" -v f="$ltty" 'index(p, "|" $2 "|") {print ($2==f ? 2 : 1), $1, $2}' |
   sort -rn | head -1 | cut -d' ' -f3)
 if [ -n "$att" ]; then
   jump "$att"; surface "$att"; exit 0
@@ -244,11 +326,11 @@ fi
 # ③ nobody local shows it → retune the surface you're looking at
 [ -n "$ftty" ] && { jump "$ftty"; exit 0; }
 
-# invoked from a non-tmux surface (ssh tab / other app): retune the most
-# recently active local client and raise it; wezterm down → any client
+# from a non-tmux surface: retune the most recent local client and raise
+# it; all clients remote → settle for the most recent of those
 client=""
-[ -n "$wtty" ] && client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null |
-  awk -v p="|$wtty|" 'index(p, "|" $2 "|")' | sort -rn | head -1 | cut -d' ' -f2)
+[ -n "$lcl" ] && client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null |
+  awk -v p="|$lcl|" 'index(p, "|" $2 "|")' | sort -rn | head -1 | cut -d' ' -f2)
 [ -n "$client" ] || client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null |
   sort -rn | head -1 | cut -d' ' -f2)
 [ -n "$client" ] || exit 0
