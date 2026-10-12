@@ -74,7 +74,6 @@ for r in "${rows[@]}"; do
   [ -z "$name" ] && name=$win
 
   read -r prompt <<<"$prompt"                 # first line, trimmed
-  [ ${#prompt} -gt 48 ] && prompt="${prompt:0:48}…"
   # keep tabs out of the sort record; markup escaping happens in the
   # assembler awk below, after display widths are counted on raw text
   name=${name//$'\t'/ } ; prompt=${prompt//$'\t'/ }
@@ -99,28 +98,55 @@ mapfile -t sorted < <(printf '%s\n' "${ranked[@]}" | sort -t$'\t' -k1,1n -k2,2n)
 # Assemble markup rows, padding name/prompt to the run's max display width
 # (CJK/emoji = 2 cells; gawk) so columns align — needs a dual-width mono
 # theme font. Escaping happens here, after widths are counted on raw text.
+# The width class includes East Asian Ambiguous glyphs (–…→①°±…) — the
+# Noto CJK theme font renders those 2 cells wide, and a truncation "…"
+# drifting one cell was exactly the misalignment that class caused.
 rows=()
 mapfile -t display < <(printf '%s\n' "${sorted[@]}" | awk -F'\t' '
-  function dw(s,  i, n, w, c) {
+  BEGIN { vs16 = sprintf("%c", 0xFE0F); zwj = sprintf("%c", 0x200D) }
+  # cells per char: VS16/ZWJ joiners render zero-width; CJK/fullwidth/emoji
+  # and the East-Asian-Ambiguous set render 2 in the Noto CJK theme font —
+  # class verified against the hmtx table of that very font. Exceptions
+  # counted as 1, their real advance: – (U+2013, 1.07) and ° (U+00B0,
+  # 0.74); — (U+2014, 1.79) stays 2 as the closest integer.
+  function dwc(c) {
+    if (c == vs16 || c == zwj) return 0
+    return (c ~ /[　-〿ぁ-ヿ一-鿿㐀-䶿가-힣豈-﫻！-｠🌀-🧿—-…←-↙①-⒇±§×÷·‰✅❌❓❔❗⭐✨⚡⏰⏳➕➖⛔⚪⚫☕✊✋☔⛄]/) ? 2 : 1
+  }
+  function dw(s,  i, n, w) {
     n = length(s); w = 0
-    for (i = 1; i <= n; i++) {
-      c = substr(s, i, 1)
-      w += (c ~ /[　-〿ぁ-ヿ一-鿿㐀-䶿가-힣豈-﫻！-｠🌀-🧿]/) ? 2 : 1
-    }
+    for (i = 1; i <= n; i++) w += dwc(substr(s, i, 1))
     return w
   }
+  # truncate to a display-width budget, ellipsis (2 cells) included
+  function dcut(s, maxw,   i, n, c, out, w) {
+    if (dw(s) <= maxw) return s
+    out = ""; w = 0; n = length(s); maxw -= 2
+    for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (w + dwc(c) > maxw) break; out = out c; w += dwc(c) }
+    return out "…"
+  }
+  # strip glyphs the theme font lacks: fallback-font emoji render ~3.5 cells
+  # wide against the 2 counted (+12px each, drifting their row) — a picker
+  # row does not need them, and the status dots are built separately
+  function nofb(s) {
+    gsub(/[🀀-🫿☀-➿⬀-⯿️‍]/, "", s)
+    return s
+  }
   function esc(s) { gsub(/&/, "\\&amp;", s); gsub(/</, "\\&lt;", s); gsub(/>/, "\\&gt;", s); return s }
-  { nm[NR]=$3; pr[NR]=$4; age[NR]=$5; dot[NR]=$6; agt[NR]=$8
-    nw[NR]=dw($3); pw[NR]=dw($4)
+  { nm[NR] = dcut(nofb($3), 30); pr[NR] = dcut(nofb($4), 60); age[NR]=$5; dot[NR]=$6; agt[NR]=$8
+    nw[NR] = dw(nm[NR]); pw[NR] = dw(pr[NR])
     if (nw[NR] > nmx) nmx = nw[NR]
     if (pw[NR] > pmx) pmx = pw[NR] }
   END {
     if (nmx > 30) nmx = 30; if (nmx < 8) nmx = 8      # name column: 8..30 cells
     for (i = 1; i <= NR; i++) {
       line = dot[i] "  " esc(agt[i]) " · " esc(nm[i]) sprintf("%*s", nmx - nw[i], "")
-      if (pr[i] != "")
-        line = line "   <span foreground=\"#5C6370\" size=\"smaller\">" esc(pr[i]) sprintf("%*s", pmx - pw[i], "") "</span>"
-      print line "   <span foreground=\"#5C6370\" size=\"smaller\">" sprintf("%3s", age[i]) "</span>"
+      # prompt span always emitted (an empty prompt keeps the column width)
+      # so the trailing age starts at one fixed x. Same size as the base
+      # font on purpose: size="smaller" scales by 1/1.2 and puts column
+      # edges on fractional pixels — one grid, exact integer cells.
+      line = line "   <span foreground=\"#5C6370\">" esc(pr[i]) sprintf("%*s", pmx - pw[i], "") "</span>"
+      print line "   <span foreground=\"#5C6370\">" age[i] "</span>"
     }
   }')
 for rec in "${sorted[@]}"; do
