@@ -35,10 +35,10 @@ case "$stage" in
     cur_sess=$(tmux display -p '#{session_name}')
     cur_win=$(tmux display -p '#{window_id}')
     src_desc=$(tmux display -p '#{window_name}/#{pane_current_command}')
-    snap=""
-    items=()
-    keys="123456789""abcdefghijklmnop""rstuvwxyz"   # q 留给「取消」
-    idx=0
+    snap="N"$'\t'"-"$'\t'"-"$'\t'"-"$'\n'
+    items=("+ 新 session" "0" "run-shell \"$SELF tgt 0\"")
+    keys="_""123456789""abcdefghijklmnop""rstuvwxyz"   # 首位占位(0 已给 ✚); q 留给「取消」
+    idx=1
 
     add() {  # add <label> <快照行>; 键用尽后静默截断
       local k="${keys:$idx:1}"
@@ -65,10 +65,6 @@ case "$stage" in
       addwins "$sname" "  "
     done < <(tmux list-sessions -F $'#{session_name}\t#{pane_id}' | LC_ALL=C sort)
 
-    if [ "$idx" -eq 0 ]; then
-      msg "没有可去的目的地"
-      exit 0
-    fi
     tmux set -g @mt_menu "$snap"
     tmux display-menu -T " 移动 [$cur_sess] $src_desc → ? " -x C -y C \
       "${items[@]}" "取消" q ""
@@ -87,19 +83,43 @@ case "$stage" in
       exit 0
     fi
     case "$(tmux display -p '#{session_name}')" in floax-*) in_floax=1 ;; esac
-    case "$tsess" in floax-*) to_floax=1 ;; esac
-    if [ "$mode" = W ]; then
+    if [ "$mode" = N ]; then
+      # 源窗 id 必须先取: new-session 会把命令上下文的"当前 session"劫持到新建的,
+      # 之后再 display -p 拿到的是新 session 的初始窗
       src=$(tmux display -p '#{window_id}')
       mv=move-window
-    else
-      src=$(tmux display -p '#{pane_id}')
-      mv=move-pane
+      # 新 session: 未占用的最小数字命名, 建好后迁入, 收尾杀初始窗
+      name=$(tmux list-sessions -F '#{session_name}' | grep -E '^[0-9]+$' |
+             sort -n | awk 'BEGIN{n=1} $1==n{n++} END{print n}')
+      if ! tmux new-session -d -s "$name"; then
+        msg "新建 session 失败: $name"
+        cleanup
+        exit 0
+      fi
+      tmpwid=$(tmux list-windows -t "=$name" -F '#{window_id}')
+      pret=$(tmux list-panes -t "=$name" -F '#{pane_id}')
+      mode=W
+      target="=$name:"
+      tsess=$name
+    fi
+    case "$tsess" in floax-*) to_floax=1 ;; esac
+    if [ -z "$src" ]; then
+      if [ "$mode" = W ]; then
+        src=$(tmux display -p '#{window_id}')
+        mv=move-window
+      else
+        src=$(tmux display -p '#{pane_id}')
+        mv=move-pane
+      fi
     fi
     # popup 内触发不切走; 目标是 floax 也不预切(move 后弹 popup, client 留原地)
     if [ -z "$in_floax" ] && [ -z "$to_floax" ]; then
       switch_to "$pret"
     fi
     if err=$(tmux "$mv" -s "$src" -t "$target" 2>&1); then
+      if [ -n "$tmpwid" ]; then
+        tmux kill-window -t "$tmpwid" 2>/dev/null
+      fi
       if [ -z "$in_floax" ]; then
         if [ -n "$to_floax" ]; then
           popup_to "$tsess"
