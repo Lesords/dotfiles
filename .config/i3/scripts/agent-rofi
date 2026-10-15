@@ -90,6 +90,33 @@ for sp in "${stale[@]}"; do
   done
 done
 
+# remote agents via agent-hub (LAN aggregator): the same @pane_* data proxied
+# with host attribution (status/title/age/project/session). Ranked +10 so
+# locals always sort first. Hub down / token missing → silently local-only.
+if [ -f "$HOME/.config/agent-hub/token" ] && command -v curl >/dev/null; then
+  lnode=$(jq -r '[.[] | select(.url | test("//(127\\.0\\.0\\.1|localhost)(:|/)"))][0].name // empty' \
+    "$HOME/.config/agent-hub/nodes.json" 2>/dev/null)
+  if [ -n "$lnode" ]; then
+    while IFS=$'\t' read -r rst rtitle rproj rwin rsess rage rts rhost rant rpane; do
+      [ -n "$rhost" ] || continue
+      case $rst in   # same dots/ranks as local rows
+        waiting)    rrank=0; dot=$(printf '<span foreground="#E06C75">⏳️</span>') ;;
+        running)    rrank=1; dot=$(printf '<span foreground="#E5C07B">⚡️</span>') ;;
+        background) rrank=2; dot='<span foreground="#5C6370">🌙</span>' ;;
+        idle)       rrank=3; dot='<span foreground="#98C379">💤</span>' ;;
+        *)          rrank=2; dot=$(printf '<span foreground="#5C6370">?️</span>') ;;
+      esac
+      rmins=$(( (now - ${rts%.*}) / 60 )); [ "$rmins" -lt 0 ] && rmins=0
+      rname="[${rhost}] ${rtitle:-$rproj}"
+      rname=${rname//$'\t'/ }
+      ranked+=("$((rrank+10))"$'\t'"$rmins"$'\t'"$rname"$'\t'"$rproj"$'\t'"${rage:--}"$'\t'"$dot"$'\t'"${rpane:-remote}"$'\t'"${rant:-claude}"$'\t'"$rst"$'\t'"$rwin"$'\t'"$rsess"$'\t'"$rhost")
+    done < <(curl -sm 2 "http://127.0.0.1:7680/api/status?token=$(cat "$HOME/.config/agent-hub/token")" 2>/dev/null |
+      jq -r --arg l "$lnode" '.agents[] | select(.host != $l) |
+        [.status, (.title // ""), (.project // ""), (.window // ""), (.session // ""),
+         (.age // "-"), (.ts // 0), (.host // ""), (.agent // "claude"), (.pane // "")] | @tsv' 2>/dev/null)
+  fi
+fi
+
 [ ${#ranked[@]} -eq 0 ] && { command -v notify-send >/dev/null && notify-send -u low "agent-rofi" "no agents running"; exit 0; }
 
 # waiting first, idle last; newest event first within a rank
@@ -150,14 +177,14 @@ mapfile -t display < <(printf '%s\n' "${sorted[@]}" | awk -F'\t' '
     }
   }')
 for rec in "${sorted[@]}"; do
-  IFS=$'\t' read -r _ _ _ _ _ _ pane agent status win sess <<<"$rec"
-  rows+=("$pane|$agent|$status|$win|$sess")
+  IFS=$'\t' read -r _ _ _ _ _ _ pane agent status win sess host <<<"$rec"
+  rows+=("$pane|$agent|$status|$win|$sess|${host:-}")
 done
 
 if [ "${1:-}" = "--dry-run" ]; then
   for i in "${!rows[@]}"; do
-    IFS='|' read -r pane agent status win sess <<<"${rows[i]}"
-    printf '%s   -> jump session=%s pane=%s\n' "${display[i]}" "$sess" "$pane"
+    IFS='|' read -r pane agent status win sess host <<<"${rows[i]}"
+    printf '%s   -> jump %ssession=%s pane=%s\n' "${display[i]}" "${host:+[$host] }" "$sess" "$pane"
   done
   exit 0
 fi
@@ -171,7 +198,7 @@ idx=$(printf '%s\n' "${display[@]}" |
 [[ $idx =~ ^[0-9]+$ ]] && (( idx < ${#rows[@]} )) || exit 0   # -format i is 0-based
 sleep 0.15   # let i3 hand focus back after rofi closes, or it yanks it later
 
-IFS='|' read -r pane agent status win sess <<<"${rows[idx]}"
+IFS='|' read -r pane agent status win sess host <<<"${rows[idx]}"
 
 jump() { tmux switch-client -c "$1" -t "$sess" \; select-window -t "$pane" \; select-pane -t "$pane"; }
 # exact-id focus only — bare class focus marches i3 through every match
@@ -266,6 +293,73 @@ konsole_surface() {  # raise the konsole window running tmux client tty $1,
   return 1
 }
 wjson=$(wezterm cli --no-auto-start list --format json 2>/dev/null)
+
+# remote agent (agent-hub row) → find a wezterm pane whose visible content
+# shows a tmux status bar (i.e., an ssh with tmux attached to this target);
+# switch its tmux window via a quick non-interactive ssh command. None
+# found (bare ssh or no ssh) → spawn a fresh window with inline pre-select.
+# Detection is purely local: wezterm get-text reveals the tmux status line
+# — no ports, no remote API, NAT-proof.
+if [ -n "${host:-}" ]; then
+  tgt=$(jq -r --arg h "$host" '.[] | select(.name == $h) | .url |
+        sub("^https?://"; "") | sub("[/:].*$"; "")' \
+    "$HOME/.config/agent-hub/nodes.json" 2>/dev/null | head -1)
+  if [ -n "$tgt" ]; then
+    # scan every wezterm pane whose foreground is ssh to this target;
+    # read its visible bottom line — a tmux status bar is long and dense
+    # (window list + clock), a bare ssh is blank or a short prompt
+    found=""; fpane=""; fwid=""
+    while IFS=$'\t' read -r tty; do
+      pid_args=$(ps -t "${tty#/dev/}" -o pid= -o args= 2>/dev/null)
+      case "$pid_args" in *ssh*"$tgt"*) ;; *) continue ;; esac
+      pid=$(echo "$pid_args" | head -1 | awk '{print $1}')
+      pids=$(echo "$pid_args" | awk '{print $1}')
+      is_ssh=0
+      for p in $pids; do
+        cmd=$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null)
+        case "$cmd" in *ssh*"$tgt"*) is_ssh=1; break ;; esac
+      done
+      [ "$is_ssh" = 1 ] || continue
+      # bottom non-blank line: tmux status bar spans wide & dense
+      bottom=$(wezterm cli get-text --pane-id \
+        "$(printf '%s' "$wjson" | jq -r --arg t "$tty" \
+          '[.[] | select(.tty_name == $t)][0].pane_id // empty' 2>/dev/null)" 2>/dev/null |
+        grep -v '^\s*$' | tail -1)
+      # tmux status heuristic: >30 non-space chars AND contains a
+      # digit+space+word pattern (window list "0 name *" / "1 name -")
+      nonspace=$(printf '%s' "$bottom" | tr -d ' \t' | wc -c)
+      if [ "$nonspace" -gt 20 ] && printf '%s' "$bottom" | grep -qE '[0-9] +[a-zA-Z0-9_;-]+ +[*-]'; then
+        found=$tty
+        read -r fpane fwid < <(printf '%s' "$wjson" | jq -r --arg t "$tty" \
+          '[.[] | select(.tty_name == $t)][0] | "\(.pane_id) \(.window_id)"' 2>/dev/null)
+        break
+      fi
+    done < <(printf '%s' "$wjson" | jq -r '.[].tty_name // empty' 2>/dev/null | sort -u)
+
+    if [ -n "$found" ]; then
+      wezterm cli --no-auto-start activate-pane --pane-id "$fpane" >/dev/null 2>&1
+      x=$(wxmap "$fwid") && raise "$x"
+      # switch the remote tmux: session + window + pane in one shot via
+      # /api/focus (select-window alone can't cross sessions; switch-client
+      # needs a client, which the endpoint resolves). Falls back to raw
+      # ssh when the device runs an old agent-server without the endpoint.
+      nurl=$(jq -r --arg h "$host" '.[] | select(.name == $h) | .url' \
+        "$HOME/.config/agent-hub/nodes.json" 2>/dev/null)
+      ntok=$(jq -r --arg h "$host" '.[] | select(.name == $h) | .token' \
+        "$HOME/.config/agent-hub/nodes.json" 2>/dev/null)
+      curl -sm 2 -X POST "$nurl/api/focus/$pane?token=$ntok" >/dev/null 2>&1 || \
+        ssh "$tgt" "c=\$(tmux list-clients -F '#{client_name}' | head -1);
+                    tmux switch-client -c \"\$c\" -t '$sess';
+                    tmux select-window -t '$pane';
+                    tmux select-pane -t '$pane'" >/dev/null 2>&1 &
+    else
+      wezterm cli --no-auto-start spawn --new-window -- \
+        ssh -t "$tgt" "tmux select-window -t '$pane'; tmux attach -t '$sess'" \
+        >/dev/null 2>&1
+    fi
+  fi
+  exit 0
+fi
 
 # activate the tab running tmux client $1 and raise its window via wxmap's
 # exact X id, verified against wezterm's focus report; falls back to a

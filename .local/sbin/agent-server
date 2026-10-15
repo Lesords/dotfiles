@@ -14,6 +14,8 @@ Endpoints (all but / require ?token=):
   /                      embedded single-page UI (list, preview, terminal)
   /api/status            agent rows as JSON
   /api/preview/<pane>    last 30 lines of the pane (tmux capture-pane)
+  /api/focus/<pane> (POST)  jump this machine's tmux to the pane: switch
+                         the latest client to its session + select window
   /api/term/<pane>  (WS) live terminal: binary frames = tty bytes, first
                          text frame {"cols","rows"} sets the pty size
 
@@ -247,6 +249,90 @@ def pane_geometry(pane):
     if len(f) != 3 or not (f[0].isdigit() and f[1].isdigit()):  # cols/rows
         return None                  # never do
     return int(f[0]), int(f[1]), f[2]
+
+
+def client_rows():
+    """Attached tmux clients, keyed by the TCP source port of the ssh
+    connection that owns them: SSH_CONNECTION ("srcip srcport ...") sits in
+    the client process env. Lets a remote picker correlate 'my local ssh
+    tab' ↔ 'the tmux client it owns' — and tell attached from bare shells."""
+    rows = []
+    try:
+        out = subprocess.run(
+            [TMUX, "list-clients",
+             "-F", "#{client_pid}|#{client_tty}|#{session_name}"
+                   "|#{client_activity}"],
+            capture_output=True, text=True, errors="replace", timeout=3,
+        ).stdout
+    except Exception:
+        return rows
+    for line in out.splitlines():
+        f = line.split("|", 3)
+        if len(f) != 4:
+            continue
+        pid, tty, sess, act = f
+        port = None
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as fh:
+                for kv in fh.read().decode("utf-8", "replace").split("\0"):
+                    if kv.startswith("SSH_CONNECTION="):
+                        parts = kv.split("=", 1)[1].split()
+                        if len(parts) >= 2 and parts[1].isdigit():
+                            port = parts[1]
+                        break
+        except OSError:
+            pass
+        rows.append({"tty": tty, "session": sess, "port": port,
+                     "activity": int(act) if act.isdigit() else 0})
+    return rows
+
+
+def focus_agent(pane, port=None):
+    """Drive this machine's tmux to the pane: switch a client to its
+    session, then select window+pane. With ?port= the client is the one
+    whose ssh connection owns that TCP source port (exact surface match);
+    without it, the most recently active client. The selects are
+    session-global, so a client that attaches a moment later (the picker
+    spawns "ssh ... tmux attach" and focuses in parallel) lands on the
+    right window too. Returns (http code, json body)."""
+    try:
+        sess = subprocess.run(
+            [TMUX, "display-message", "-p", "-t", pane, "#{session_name}"],
+            capture_output=True, text=True, errors="replace", timeout=3,
+        ).stdout.strip()
+    except Exception:
+        sess = ""
+    if not sess:
+        return 404, '{"error":"pane gone"}'
+    client = ""
+    if port:
+        for c in client_rows():
+            if c.get("port") == port:
+                client = c["tty"]
+                break
+    if not client:
+        best = -1
+        try:
+            for line in subprocess.run(
+                [TMUX, "list-clients",
+                 "-F", "#{client_activity} #{client_name}"],
+                capture_output=True, text=True, errors="replace", timeout=3,
+            ).stdout.splitlines():
+                f = line.split()
+                if len(f) == 2 and f[0].isdigit() and int(f[0]) > best:
+                    best, client = int(f[0]), f[1]
+        except Exception:
+            pass
+    if client:                        # best-effort: races with a detach
+        subprocess.run([TMUX, "switch-client", "-c", client, "-t", sess],
+                       capture_output=True, timeout=3)
+    r = subprocess.run([TMUX, "select-window", "-t", pane, ";",
+                        "select-pane", "-t", pane],
+                       capture_output=True, timeout=3)
+    if r.returncode != 0:
+        return 404, '{"error":"pane gone"}'
+    return 200, json.dumps({"ok": True, "session": sess,
+                            "client": client or None})
 
 
 def transcript_path(session_id):
@@ -1785,6 +1871,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/status":
             self._send(200, json.dumps({"ts": int(time.time()), "ver": VER,
                                         "agents": agent_rows()}))
+        elif u.path == "/api/clients":
+            self._send(200, json.dumps({"clients": client_rows()}))
         elif u.path.startswith("/api/chat/"):
             m = re.match(r"^/api/chat/(%\d+)$", u.path)
             pane = m.group(1) if m else ""
@@ -1870,6 +1958,12 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if bad_token(u.query):
             self._send(403, '{"error":"bad token"}')
+            return
+        m = re.match(r"^/api/focus/(%\d+)$", u.path)   # remote jump: drive
+        if m:                                          # this tmux to a pane
+            qp = parse_qs(u.query).get("port", [""])[0]
+            self._send(*focus_agent(m.group(1),
+                                    qp if qp.isdigit() else None))
             return
         m = re.match(r"^/api/send/(%\d+)$", u.path)
         if not m or not pane_geometry(m.group(1)):
