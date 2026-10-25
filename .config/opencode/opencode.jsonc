@@ -34,6 +34,20 @@
             "max":   { "reasoningEffort": "max" }
           }
         },
+        "deepseek-v4.1-flash-1017": {
+          "name": "DeepSeek V4.1 Flash (1017)",
+          "reasoning": true,
+          "tool_call": true,
+          "modalities": { "input": ["text", "image"] },
+          "limit": { "context": 1000000, "output": 384000 },
+          "variants": {
+            "low":   { "reasoningEffort": "low" },
+            "medium":{ "reasoningEffort": "medium" },
+            "high":  { "reasoningEffort": "high" },
+            "xhigh": { "reasoningEffort": "xhigh" },
+            "max":   { "reasoningEffort": "max" }
+          }
+        },
         "glm-5.2": {
           "name": "GLM-5.2",
           "reasoning": true,
@@ -51,7 +65,7 @@
           "name": "Kimi K3",
           "reasoning": true,
           "tool_call": true,
-          "attachment": true,
+          "modalities": { "input": ["text", "image"] },
           "limit": { "context": 1048576, "output": 131072 },
           "variants": {
             "low":   { "reasoningEffort": "low" },
@@ -92,7 +106,7 @@
           "name": "GLM-5.3 Flash (77)",
           "reasoning": true,
           "tool_call": true,
-          "attachment": true,
+          "modalities": { "input": ["text", "image"] },
           "limit": { "context": 1000000, "output": 131072 }
         },
         "glm-5.1": {
@@ -105,14 +119,14 @@
           "name": "Kimi K2.7 Code (77)",
           "reasoning": true,
           "tool_call": true,
-          "attachment": true,
+          "modalities": { "input": ["text", "image"] },
           "limit": { "context": 262144, "output": 262144 }
         },
         "kimi/kimi-k3.1-pro": {
           "name": "Kimi K3.1 Pro (77)",
           "reasoning": true,
           "tool_call": true,
-          "attachment": true,
+          "modalities": { "input": ["text", "image"] },
           "limit": { "context": 1048576, "output": 131072 }
         }
       }
