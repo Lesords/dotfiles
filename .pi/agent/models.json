@@ -1,0 +1,105 @@
+{
+  "providers": {
+    "relay-compat": {
+      "name": "中转站 兼容系",
+      "baseUrl": "http://192.168.1.190/v1",
+      "api": "openai-completions",
+      "apiKey": "!cat ~/.secrets/relay190.key",
+      "compat": {
+        "supportsDeveloperRole": false
+      },
+      "models": [
+        {
+          "id": "glm-5.3",
+          "name": "GLM-5.3 (智谱)",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "thinkingLevelMap": {
+            "off": "low",
+            "minimal": "low",
+            "medium": "high",
+            "max": "max"
+          }
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 384000,
+          "thinkingLevelMap": { "minimal": null, "xhigh": "xhigh", "max": "max" }
+        },
+        {
+          "id": "glm-5.2",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "thinkingLevelMap": { "xhigh": "xhigh", "max": "max" }
+        },
+        {
+          "id": "kimi-k3",
+          "reasoning": true,
+          "contextWindow": 1048576,
+          "maxTokens": 131072,
+          "input": ["text", "image"],
+          "thinkingLevelMap": { "xhigh": "xhigh", "max": "max" }
+        },
+        {
+          "id": "qwen3.8-max",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "thinkingLevelMap": { "xhigh": "xhigh", "max": "max" }
+        }
+      ]
+    },
+    "relay77": {
+      "name": "中转站 77 (Anthropic 协议)",
+      "baseUrl": "http://192.168.1.77:3000",
+      "api": "anthropic-messages",
+      "apiKey": "!cat ~/.secrets/relay77.key",
+      "models": [
+        {
+          "id": "glm-5.3",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 131072
+        },
+        {
+          "id": "glm-5.3-flash",
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "input": ["text", "image"]
+        },
+        {
+          "id": "glm-5.1",
+          "reasoning": true,
+          "contextWindow": 202752,
+          "maxTokens": 128000
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "reasoning": true,
+          "contextWindow": 262144,
+          "maxTokens": 262144,
+          "input": ["text", "image"]
+        },
+        {
+          "id": "kimi/kimi-k3.1-pro",
+          "reasoning": true,
+          "contextWindow": 1048576,
+          "maxTokens": 131072,
+          "input": ["text", "image"]
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "reasoning": true,
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "input": ["text", "image"]
+        }
+      ]
+    }
+  }
+}

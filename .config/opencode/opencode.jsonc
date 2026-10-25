@@ -1,0 +1,121 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "relay/kimi-k3",
+  "provider": {
+    "relay": {
+      "name": "LAN 中转站 (190)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://192.168.1.190/v1",
+        "apiKey": "{file:~/.secrets/relay190.key}"
+      },
+      "models": {
+        "glm-5.3": {
+          "name": "GLM-5.3 (智谱)",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 1000000, "output": 131072 },
+          "variants": {
+            "low":  { "reasoningEffort": "low" },
+            "high": { "reasoningEffort": "high" },
+            "max":  { "reasoningEffort": "max" }
+          }
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 1000000, "output": 384000 },
+          "variants": {
+            "low":   { "reasoningEffort": "low" },
+            "medium":{ "reasoningEffort": "medium" },
+            "high":  { "reasoningEffort": "high" },
+            "xhigh": { "reasoningEffort": "xhigh" },
+            "max":   { "reasoningEffort": "max" }
+          }
+        },
+        "glm-5.2": {
+          "name": "GLM-5.2",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 1000000, "output": 131072 },
+          "variants": {
+            "low":   { "reasoningEffort": "low" },
+            "medium":{ "reasoningEffort": "medium" },
+            "high":  { "reasoningEffort": "high" },
+            "xhigh": { "reasoningEffort": "xhigh" },
+            "max":   { "reasoningEffort": "max" }
+          }
+        },
+        "kimi-k3": {
+          "name": "Kimi K3",
+          "reasoning": true,
+          "tool_call": true,
+          "attachment": true,
+          "limit": { "context": 1048576, "output": 131072 },
+          "variants": {
+            "low":   { "reasoningEffort": "low" },
+            "medium":{ "reasoningEffort": "medium" },
+            "high":  { "reasoningEffort": "high" },
+            "xhigh": { "reasoningEffort": "xhigh" },
+            "max":   { "reasoningEffort": "max" }
+          }
+        },
+        "qwen3.8-max": {
+          "name": "Qwen3.8 Max",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 1000000, "output": 131072 },
+          "variants": {
+            "low":   { "reasoningEffort": "low" },
+            "medium":{ "reasoningEffort": "medium" },
+            "high":  { "reasoningEffort": "high" },
+            "xhigh": { "reasoningEffort": "xhigh" },
+            "max":   { "reasoningEffort": "max" }
+          }
+        }
+      }
+    },
+    "anthropic": {
+      "options": {
+        "baseURL": "http://192.168.1.77:3000/v1",
+        "apiKey": "{file:~/.secrets/relay77.key}"
+      },
+      "models": {
+        "glm-5.3": {
+          "name": "GLM-5.3 (77)",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 1000000, "output": 131072 }
+        },
+        "glm-5.3-flash": {
+          "name": "GLM-5.3 Flash (77)",
+          "reasoning": true,
+          "tool_call": true,
+          "attachment": true,
+          "limit": { "context": 1000000, "output": 131072 }
+        },
+        "glm-5.1": {
+          "name": "GLM-5.1 (77)",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 202752, "output": 128000 }
+        },
+        "kimi-k2.7-code": {
+          "name": "Kimi K2.7 Code (77)",
+          "reasoning": true,
+          "tool_call": true,
+          "attachment": true,
+          "limit": { "context": 262144, "output": 262144 }
+        },
+        "kimi/kimi-k3.1-pro": {
+          "name": "Kimi K3.1 Pro (77)",
+          "reasoning": true,
+          "tool_call": true,
+          "attachment": true,
+          "limit": { "context": 1048576, "output": 131072 }
+        }
+      }
+    }
+  }
+}
