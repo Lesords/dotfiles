@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""relay-models — 中转站模型列表 / 通道存活 / 响应速度基准
+
+用法:
+  relay-models relays                   中转站信息表(地址/协议/密钥/已配置数)
+  relay-models list  [中转站]             模型列表(✱ = 已配置进 agent 的)
+  relay-models check [中转站] [模型...]   通道存活(发一句"只回复ok")
+  relay-models bench [中转站] [模型...]   速度基准: TTFB / 总时长 / 思考tok / 吞吐
+      --all          测该站全部模型(默认只测已配置进 agent 的)
+      --prompt "…"   自定义基准提示词(默认快排序题,兼顾思考与生成)
+      --runs N       重复轮数(默认 1)
+
+中转站: 190 (OpenAI 协议) / 77 (Anthropic 协议)
+密钥: ~/.secrets/relay190.key, relay77.key (600 权限, 不入任何仓库)
+已配置 = pi(~/.pi/agent/models.json) ∪ opencode(~/.config/opencode/opencode.jsonc) 两侧合并;
+        opencode 由 models.dev 元数据自动带出的模型(如 claude 全目录)不在配置文件中,不计入
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+from urllib.parse import urlparse
+
+RELAYS = {
+    "190": dict(
+        models="http://192.168.1.190/v1/models",
+        chat="http://192.168.1.190/v1/chat/completions",
+        key="~/.secrets/relay190.key",
+        proto="openai",
+    ),
+    "77": dict(
+        models="http://192.168.1.77:3000/v1/models",
+        chat="http://192.168.1.77:3000/v1/messages",
+        key="~/.secrets/relay77.key",
+        proto="anthropic",
+    ),
+}
+PI_MODELS = "~/.pi/agent/models.json"
+OPENCODE_CONFIG = "~/.config/opencode/opencode.jsonc"
+DEFAULT_PROMPT = "用 Python 写一个快速排序函数,逐行加注释,最后说明平均和最坏复杂度。"
+
+
+def dwidth(s):
+    """显示宽度: CJK 等宽字符按 2 格计(终端渲染口径), 其余 1 格"""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in str(s))
+
+
+def pad(s, width, left=False):
+    """按显示宽度右对齐(left=True 则左对齐)填充"""
+    s = str(s)
+    gap = max(0, width - dwidth(s))
+    return s + " " * gap if left else " " * gap + s
+
+
+def load_key(relay):
+    path = os.path.expanduser(RELAYS[relay]["key"])
+    try:
+        return open(path).read().strip()
+    except OSError:
+        sys.exit(f"error: 缺少密钥文件 {path}")
+
+
+def headers_for(relay, key):
+    if RELAYS[relay]["proto"] == "anthropic":
+        return {"Content-Type": "application/json", "x-api-key": key,
+                "anthropic-version": "2023-06-01"}
+    return {"Content-Type": "application/json", "Authorization": "Bearer " + key}
+
+
+def api(relay, url, payload=None, timeout=30):
+    key = load_key(relay)
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers_for(relay, key),
+                                 method="POST" if data else "GET")
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def fetch_model_ids(relay):
+    with api(relay, RELAYS[relay]["models"], timeout=20) as r:
+        return sorted(m["id"] for m in json.load(r)["data"])
+
+
+def configured_sets(relay):
+    """返回 (pi已配置id集, opencode已配置id集), 按 baseURL 指向该站匹配"""
+    host = urlparse(RELAYS[relay]["models"]).hostname
+    pi_ids, oc_ids = set(), set()
+    try:
+        cfg = json.load(open(os.path.expanduser(PI_MODELS)))
+        for prov in cfg.get("providers", {}).values():
+            if host in prov.get("baseUrl", ""):
+                pi_ids |= {m["id"] for m in prov.get("models", [])}
+    except (OSError, ValueError) as e:
+        print(f"warn: 解析 {PI_MODELS} 失败({e}), pi 侧配置忽略", file=sys.stderr)
+    try:
+        txt = open(os.path.expanduser(OPENCODE_CONFIG)).read()
+        txt = re.sub(r"^\s*//.*$", "", txt, flags=re.M)
+        for prov in json.loads(txt).get("provider", {}).values():
+            if host in (prov.get("options") or {}).get("baseURL", ""):
+                oc_ids |= set(prov.get("models") or {})
+    except (OSError, ValueError) as e:
+        print(f"warn: 解析 {OPENCODE_CONFIG} 失败({e}), opencode 侧配置忽略", file=sys.stderr)
+    return pi_ids, oc_ids
+
+
+def resolve_models(relay, wanted, use_all):
+    if wanted:
+        return wanted
+    if use_all:
+        return fetch_model_ids(relay)
+    pi_set, oc_set = configured_sets(relay)
+    ids = sorted(pi_set | oc_set)
+    if not ids:
+        print(f"[{relay}] 无已配置模型(检查 {PI_MODELS} / {OPENCODE_CONFIG}),跳过;可用 --all 测全站")
+        return None
+    return ids
+
+
+# ---------- 子命令 ----------
+
+def cmd_relays(args):
+    """打印内置中转站信息表(顺带自检密钥文件)"""
+    print("  " + pad("id", 5, True) + pad("proto", 11, True) + pad("models_url", 40, True)
+          + pad("key_file", 26, True) + "configured")
+    for rid, r in RELAYS.items():
+        key_path = os.path.expanduser(r["key"])
+        status = "key ok" if os.path.exists(key_path) else "KEY MISSING!"
+        pi_set, oc_set = configured_sets(rid)
+        print("  " + pad(rid, 5, True) + pad(r["proto"], 11, True) + pad(r["models"], 40, True)
+              + pad(r["key"], 26, True) + f"pi {len(pi_set)}, oc {len(oc_set)} ({status})")
+
+
+def cmd_list(args):
+    for relay in ([args.relay] if args.relay else RELAYS):
+        try:
+            ids = fetch_model_ids(relay)
+        except Exception as e:
+            print(f"[{relay}] 获取失败: {e}")
+            continue
+        pi_set, oc_set = configured_sets(relay)
+        print(f"[{relay}] {len(ids)} 个模型(* = pi+opencode 都配, p = 仅pi, o = 仅opencode):")
+        for i in ids:
+            mark = ("*" if i in pi_set and i in oc_set
+                    else "p" if i in pi_set else "o" if i in oc_set else " ")
+            print(f"  {mark} {i}")
+
+
+def one_shot(relay, model):
+    """存活检查: 一句话请求, 返回 (ok, 摘要)"""
+    proto = RELAYS[relay]["proto"]
+    if proto == "anthropic":
+        payload = {"model": model, "max_tokens": 4096,
+                   "messages": [{"role": "user", "content": "只回复两个字符: ok"}]}
+    else:
+        payload = {"model": model, "max_tokens": 4096,
+                   "messages": [{"role": "user", "content": "只回复两个字符: ok"}]}
+    try:
+        with api(relay, RELAYS[relay]["chat"], payload, timeout=90) as r:
+            d = json.load(r)
+    except urllib.error.HTTPError as e:
+        return False, e.read().decode()[:80]
+    except Exception as e:
+        return False, str(e)[:80]
+    if proto == "anthropic":
+        if d.get("type") == "error":
+            return False, d["error"].get("message", "")[:80]
+        text = " ".join(b.get("text", "") for b in d.get("content", [])
+                        if b.get("type") == "text").strip()
+    else:
+        if "choices" not in d:
+            return False, json.dumps(d.get("error", d), ensure_ascii=False)[:80]
+        text = d["choices"][0]["message"].get("content", "").strip()
+    if not text:
+        return False, "空回复(思考烧尽或 max_tokens 不足)"
+    return True, text[:20]
+
+
+def cmd_check(args):
+    fails = 0
+    for relay in ([args.relay] if args.relay else RELAYS):
+        models = resolve_models(relay, args.models, args.all)
+        if not models:
+            continue
+        print(f"[{relay}] 存活检查 {len(models)} 个模型:")
+        for m in models:
+            ok, info = one_shot(relay, m)
+            print(f"  {'✓' if ok else '✗'} {m:28s} {info if not ok else ''}")
+            fails += 0 if ok else 1
+    sys.exit(1 if fails else 0)
+
+
+def bench_one(relay, model, prompt):
+    """流式基准, 返回 (指标dict 或 None, 错误信息)"""
+    proto = RELAYS[relay]["proto"]
+    if proto == "anthropic":
+        payload = {"model": model, "max_tokens": 16384, "stream": True,
+                   "messages": [{"role": "user", "content": prompt}]}
+    else:
+        payload = {"model": model, "max_tokens": 4096, "stream": True,
+                   "stream_options": {"include_usage": True},
+                   "messages": [{"role": "user", "content": prompt}]}
+    t0 = time.time()
+    first = None
+    out_tokens = None
+    think_tokens = None
+    think_chars = 0
+    try:
+        with api(relay, RELAYS[relay]["chat"], payload, timeout=120) as r:
+            for raw in r:
+                if not raw.startswith(b"data:"):
+                    continue
+                body = raw[5:].strip()
+                if not body or body == b"[DONE]":
+                    continue
+                try:
+                    j = json.loads(body)
+                except ValueError:
+                    continue
+                if proto == "openai":
+                    if j.get("usage"):
+                        u = j["usage"]
+                        out_tokens = u.get("completion_tokens")
+                        det = u.get("completion_tokens_details") or {}
+                        think_tokens = det.get("reasoning_tokens", think_tokens)
+                    d = (j.get("choices") or [{}])[0].get("delta", {})
+                    if first is None and (d.get("content") or d.get("reasoning_content")):
+                        first = time.time()
+                else:
+                    if j.get("type") == "message_delta" and j.get("usage"):
+                        out_tokens = j["usage"].get("output_tokens", out_tokens)
+                    d = j.get("delta", {})
+                    if d.get("type") == "thinking_delta":
+                        think_chars += len(d.get("thinking", ""))
+                    if first is None and d.get("type") in ("text_delta", "thinking_delta"):
+                        first = time.time()
+    except urllib.error.HTTPError as e:
+        return None, e.read().decode()[:80]
+    except Exception as e:
+        return None, str(e)[:80]
+    if first is None:
+        return None, "无输出/超时"
+    end = time.time()
+    if think_tokens is None and proto == "anthropic" and think_chars:
+        think_tokens = f"~{think_chars // 3}"
+    dur = end - first
+    return dict(ttfb=first - t0, total=end - t0, think=think_tokens,
+                out=out_tokens, rate=(out_tokens / dur if out_tokens else None)), None
+
+
+def cmd_bench(args):
+    for relay in ([args.relay] if args.relay else RELAYS):
+        models = resolve_models(relay, args.models, args.all)
+        if not models:
+            continue
+        print(f"[{relay}] 速度基准 {len(models)} 个模型 × {args.runs} 轮:")
+        print("  " + pad("model", 30, left=True) + pad("ttfb(s)", 9)
+              + pad("total(s)", 10) + pad("think", 8)
+              + pad("out", 6) + pad("tok/s", 7))
+        ranking = []
+        fails = 0
+        for m in models:
+            results = []
+            err = None
+            for _ in range(args.runs):
+                r, err = bench_one(relay, m, args.prompt)
+                if r:
+                    results.append(r)
+            if not results:
+                print(f"  {m:30s}  ✗ {err}")
+                fails += 1
+                continue
+            n = len(results)
+            med = sorted(results, key=lambda x: x["total"])[n // 2]
+            think = med["think"] if med["think"] is not None else "-"
+            rate = f"{med['rate']:.0f}" if med["rate"] else "-"
+            note = f"   (中位,{n}轮)" if n > 1 else ""
+            ranking.append((med["total"], m))
+            print("  " + pad(m, 30, left=True) + pad(f"{med['ttfb']:.1f}", 9)
+                  + pad(f"{med['total']:.1f}", 10) + pad(str(think), 8)
+                  + pad(str(med["out"] or "-"), 6) + pad(rate, 7) + note)
+        if ranking:
+            board = " < ".join(f"{m}({t:.1f}s)" for t, m in sorted(ranking))
+            print(f"  ── 总时长榜: {board}")
+        if fails:
+            print(f"  ── 失败 {fails}/{len(models)}")
+            sys.exit(1)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="relay-models",
+                                 description="中转站模型列表/存活/速度基准工具 "
+                                             "(内置站点清单见 relays 子命令)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("relays", help="中转站信息表(地址/协议/密钥/已配置数)")
+    p.set_defaults(func=cmd_relays)
+    p = sub.add_parser("list", help="模型列表")
+    p.add_argument("relay", nargs="?", choices=RELAYS,
+                   help="190=192.168.1.190(OpenAI协议) 77=192.168.1.77:3000"
+                        "(Anthropic协议); 缺省两站都跑")
+    p.set_defaults(func=cmd_list)
+    p = sub.add_parser("check", help="通道存活检查")
+    p.add_argument("relay", nargs="?", choices=RELAYS,
+                   help="190=OpenAI协议 77=Anthropic协议; 缺省两站都跑")
+    p.add_argument("models", nargs="*")
+    p.add_argument("--all", action="store_true", help="检查该站全部模型")
+    p.set_defaults(func=cmd_check)
+    p = sub.add_parser("bench", help="响应速度基准")
+    p.add_argument("relay", nargs="?", choices=RELAYS,
+                   help="190=OpenAI协议 77=Anthropic协议; 缺省两站都跑")
+    p.add_argument("models", nargs="*")
+    p.add_argument("--all", action="store_true", help="测该站全部模型")
+    p.add_argument("--prompt", default=DEFAULT_PROMPT, help="自定义基准提示词(默认快排序题)")
+    p.add_argument("--runs", type=int, default=1, help="重复轮数,结果取中位(默认 1)")
+    p.set_defaults(func=cmd_bench)
+    args = ap.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
