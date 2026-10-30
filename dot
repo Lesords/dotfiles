@@ -5,6 +5,8 @@ list=(
     '.config'
     '.local'
     '.tmux.conf'
+    '.claude'
+    '.pi'
 )
 
 # Load .gitignore patterns from current directory

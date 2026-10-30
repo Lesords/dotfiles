@@ -1,0 +1,6 @@
+.local/share
+.local/sbin/__pycache__
+.pi/agent/auth.json
+.pi/agent/models-store.json
+.pi/agent/sessions
+.pi/agent/settings.json
