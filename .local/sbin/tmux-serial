@@ -1,0 +1,511 @@
+#!/bin/bash
+# tmux-serial: 串口连接器(基于 tio), 快照菜单做法同 tmux-move-to
+# prefix u → 分步连接: ①端口菜单(键=tty编号) → ②波特率(纯档位) → ③共享(开/关) → 连接
+#   ●=已连接 ◎=共享中 [别名]列; (c)配置…=不连接只改参数(档位/共享/命名); 底部挂载区(nc)围观
+# tmux-serial map → 全状态 TSV(别名/端口/标签/tty/by-id/状态), 供 agent 查询
+# 端口身份用 /dev/serial/by-id(重插稳定, tio 断线自动重连回同一口)
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+stage="${1:-start}"
+
+BAUDS="9600 57600 115200 230400 921600 1500000 3000000"   # 档位预设, 按需增删(键1..N)
+SHBASE=31000                             # 共享 TCP 端口基数: 端口 = SHBASE + tty 编号(注册空区, 被占顺延)
+msg() { tmux display-message "tmux-serial: $*"; }
+
+cleanup() {
+  tmux set -g -u @ts_menu 2>/dev/null
+  tmux set -g -u @ts_trig 2>/dev/null
+}
+
+# 该口是否已有 tio 连着: 扫 tio 进程 cmdline 匹配设备, 再按 stdin 对上 pane_tty 定位 pane
+# (命令经 send-keys 敲进 shell, tio 是 shell 的孙进程, 从 pane_pid 往下看不见)
+tio_pane() {  # <设备路径> → pane_id 或空
+  local pid tty
+  for pid in $(pgrep -x tio); do
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF "$1" || continue
+    tty=$(readlink "/proc/$pid/fd/0" 2>/dev/null)
+    printf '%s' "$(tmux list-panes -a -F $'#{pane_id}\t#{pane_tty}' |
+      awk -F'\t' -v t="$tty" '$2==t{print $1; exit}')"
+    return
+  done
+}
+
+# by-id basename → "短名\tvendor\t产品名\tif号"; 短名不含 ttyACMn 这种随重插漂移的号
+# usb-wch.cn_USB_Quad_Serial_0123456789-if02 → QuadSerial-if02 / wch.cn / Quad Serial / if02
+parse_byid() {
+  local b="${1##*/}" ifn prod vend
+  vend="${b#usb-}"; vend="${vend%%_*}"
+  b="${b#usb-}"; b="${b#*_}"              # 去 vendor 字段
+  ifn=$(printf '%s' "$b" | grep -o 'if[0-9]*$')
+  [ -n "$ifn" ] && b="${b%_$ifn}"
+  b="${b%_*}"                             # 去序列号
+  prod="${b//_/ }"; prod="${prod#USB }"
+  printf '%s%s\t%s\t%s\t%s' "${prod// /}" "${ifn:+-$ifn}" "$vend" "$prod" "$ifn"
+}
+
+tty_num() {  # <tty节点名> → 编号数字
+  local t="${1##*/}"
+  printf '%d' "$((10#${t#"${t%%[0-9]*}"}))"
+}
+
+kv_get() {  # <option> <短名> → 值或空 (@ts_baud/@ts_share/@ts_alias 通用)
+  for e in $(tmux show -gv "$1" 2>/dev/null); do
+    case "$e" in "$2="*) printf '%s' "${e#*=}"; return ;; esac
+  done
+}
+
+kv_set() {  # <option> <短名> <值|->  (值 - 表示删除该键)
+  local e rest=""
+  for e in $(tmux show -gv "$1" 2>/dev/null); do
+    case "$e" in "$2="*) ;; *) rest+="$e " ;; esac
+  done
+  if [ "$3" != "-" ]; then tmux set -g "$1" "${rest}$2=$3"
+  elif [ -n "${rest% }" ]; then tmux set -g "$1" "${rest% }"
+  else tmux set -g -u "$1" 2>/dev/null; fi
+}
+
+# 运行中的共享会话: port \t 设备 \t tty节点 \t 波特率(手动起的 tio -S 也能扫到)
+sh_sessions() {
+  local pid cmd port dev tty baud
+  for pid in $(pgrep -x tio); do
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
+    case "$cmd" in *" -S "*) ;; *) continue ;; esac
+    port=$(printf '%s' "$cmd" | grep -o 'inet:[0-9]\+' | head -1 | cut -d: -f2)
+    [ -n "$port" ] || continue
+    baud=$(printf '%s' "$cmd" | grep -o '\-b [0-9]\+' | awk '{print $2}')
+    dev=$(printf '%s' "$cmd" | awk '{print $NF}')
+    tty=$(readlink -f "$dev" 2>/dev/null); tty=${tty##*/}
+    printf '%s\t%s\t%s\t%s\n' "$port" "$dev" "$tty" "${baud:-default}"
+  done
+}
+
+# 共享端口: SHBASE+tty编号, 被监听则向上顺延找空闲
+sh_port() {  # <tty节点名> → 端口
+  local p=$((SHBASE + $(tty_num "$1")))
+  while ss -H -tln "sport = :$p" 2>/dev/null | grep -q .; do p=$((p+1)); done
+  printf '%s' "$p"
+}
+
+# 触发 pane 是 shell 才能敲命令; → pane_id 或空
+trig_shell() {
+  local cur
+  cur=$(tmux show -gv @ts_trig 2>/dev/null)
+  case "$(tmux display -p -t "$cur" '#{pane_current_command}' 2>/dev/null)" in
+    bash|zsh|sh|dash|ksh|fish) printf '%s' "$cur" ;;
+  esac
+}
+
+SEP_TAG="@SEP:"                        # 分隔行占位: @SEP:文字@; fit_seps 换成居中 ─线
+
+# 显示宽: GBK 字节数代理(中文2/ASCII1; 模糊符号高估1列, 更保守)
+dispw() { printf '%s' "$1" | sed 's/[›·─◎●▸◂○…«»×]/x/g' | iconv -f UTF-8 -t GBK 2>/dev/null | wc -c; }
+
+# 分隔行 → "──… 文字 …──" 居中: 线长按菜单宽估(sed 中文范围在本机 locale 静默失效, 故用 dispw), 宁短勿截
+fit_seps() {  # <数组名> <标题>
+  local -n arr=$1
+  local maxw=0 w i n txt tw pl pr l="" r="" j
+  for ((i=0; i<${#arr[@]}; i+=3)); do
+    n=${arr[i]}
+    case "$n" in "$SEP_TAG"*) continue ;; esac
+    w=$(dispw "$n"); (( w > maxw )) && maxw=$w
+  done
+  w=$(dispw "$2"); (( w > maxw )) && maxw=$w
+  (( maxw += 6 ))                            # GROW
+  for ((i=0; i<${#arr[@]}; i+=3)); do
+    n=${arr[i]}
+    case "$n" in "$SEP_TAG"*) ;; *) continue ;; esac
+    txt=${n#"$SEP_TAG"}; txt=${txt%@}
+    tw=$(( $(dispw "$txt") + 2 ))             # " 文字 " 显示宽
+    # 线用 ASCII '-': 多字节 ─ 有 ~114 字节预算(≈38列)会截断, ASCII 可贴满;
+    # 贴各自菜单宽(窄菜单至少 44 统一风格), 两侧均分
+    local cl=$(( maxw - 2 )); (( cl < 44 )) && cl=44
+    pl=$((cl / 2)); pr=$((cl - cl / 2))
+    l=""; r=""
+    for ((j=0; j<pl; j++)); do l+="-"; done
+    for ((j=0; j<pr; j++)); do r+="-"; done
+    arr[i]="$l $txt $r"
+  done
+}
+
+# 对齐显示行(主页/配置选口共用): vendor+产品名逐词 pad + if + tty; 窄 client 紧凑; [别名]列
+fmt_disp() {  # <wls数组名> <cw> <aw> <cvw> <vend> <prod> <ifn> <tty> <alias>
+  local -n wl=$1
+  local cw=$2 aw=$3 cvw=$4 disp pad j
+  local vend=$5 prod=$6 ifn=$7 tty=$8 al=$9
+  read -ra ws <<< "$vend $prod"
+  if [ -n "$cw" ] && [ "$cw" -lt $((50 + aw + 2)) ] 2>/dev/null; then
+    disp="$(printf '%-*s  ' "$cvw" "${vend%%.*}")$(printf '%-*s  ' "${wl[1]}" "${ws[1]}")${ifn} · ${tty#tty}"
+  else
+    pad=""
+    for j in "${!ws[@]}"; do pad+=$(printf '%-*s  ' "${wl[$j]}" "${ws[$j]}"); done
+    disp="$pad$ifn › $tty"
+  fi
+  [ "$aw" -gt 0 ] && disp="$(printf '[%-*s] ' "$((aw-2))" "$al")$disp"
+  printf '%s' "$disp"
+}
+
+# 波特率菜单(分步流程第②步): 纯档位, 选完进共享选择; cfg 模式只存参数不连接
+baud_menu() {  # <mode conn|cfg> <idx> <by-id路径> <短名> <标签>
+  local mode=$1 last b bk bitems st
+  last=$(kv_get @ts_baud "$4")
+  if [ "$mode" = conn ]; then act="shmenu"; ti="波特率"
+  else act="setbaud"; ti="配置"; fi
+  bitems=(); bk=1
+  for b in $BAUDS; do
+    if [ "$b" = "$last" ]; then bitems+=("$b ◂" "$bk" "run-shell \"$SELF $act $2 $b\"")
+    else bitems+=("$b" "$bk" "run-shell \"$SELF $act $2 $b\""); fi
+    bk=$((bk+1))
+  done
+  bitems+=("@SEP:其他@" "" "")
+  if [ "$last" = "0" ]; then bitems+=("不设(默认) ◂" "$bk" "run-shell \"$SELF $act $2 0\"")
+  else bitems+=("不设(默认)" "$bk" "run-shell \"$SELF $act $2 0\""); fi
+  bitems+=("自定义…" "$((bk+1))" "command-prompt -p \"波特率(空=返回)\" \"run-shell \\\"$SELF $act $2 %1\\\"\"")
+  if [ "$mode" = cfg ]; then    # 配置入口(不连接): 偏好段(共享/命名)
+    bitems+=("@SEP:偏好@" "" "")
+    if [ "$(kv_get @ts_share "$4")" = 1 ]; then st="共享: 开"
+    else st="共享: 关"; fi
+    bitems+=("$st" "s" "run-shell \"$SELF shswap $2\"")
+    bitems+=("命名…" "n" "command-prompt -p \"别名(空=清除)\" -I \"$(kv_get @ts_alias "$4")\" \"run-shell \\\"$SELF name $2 %1\\\"\"")
+  fi
+  bitems+=("@SEP:操作@" "" "")
+  if [ "$mode" = cfg ]; then bitems+=("返回" "b" "run-shell \"$SELF cfgmnu\"")
+  else bitems+=("返回" "b" "run-shell \"$SELF start\""); fi
+  fit_seps bitems " $5 @ $ti "
+  # 光标推到默认项(上次波特率, 无则 115200): menu 初态高亮首行, Down 补位;
+  # display-menu 阻塞到菜单关闭 → 注入须在其之前 fork 后台, 菜单激活后落键
+  local pos=0 n=0 def="$last"
+  [ -z "$def" ] && def=115200
+  for b in $BAUDS; do n=$((n+1)); [ "$b" = "$def" ] && pos=$n; done
+  [ "$def" = 0 ] && pos=$((n+2))   # 不设(默认) 在分隔行之后
+  local downs=""
+  for ((n=1; n<pos; n++)); do downs+=" Down"; done
+  [ -n "$downs" ] && ( sleep 0.1; tmux send-keys -K -t "$(tmux show -gv @ts_trig 2>/dev/null)" $downs ) &
+  tmux display-menu -T " $5 @ $ti " -x C -y C \
+    "${bitems[@]}" "取消" q ""
+}
+
+case "$stage" in
+  start)
+    cleanup
+    # 触发 pane 显式快照(run-shell 上下文的 display -p 不可靠), conn 往这敲命令
+    trig=$(tmux display -p '#{pane_id}')
+    tmux set -g @ts_trig "$trig"
+    # 宽度自适应: display-menu 无宽度参数, 菜单宽随内容, 窄 client 会被裁
+    cw=$(tmux display -p '#{client_width}' 2>/dev/null)
+    [ -z "$cw" ] && cw=$(tmux display -p -t "$trig" '#{client_width}' 2>/dev/null)
+    snap=""
+    items=()
+    declare -A used=()
+    idx=1
+
+    # 键 = tty 编号(按 N 即连 ttyACM/USB N, 缺号空置不前移);
+    # >9 或同号冲突(ACM0+USB0)顺延字母, q 留给「取消」
+    keyfor() {  # <编号> → 键(耗尽则空)
+      local k=""
+      if [ "$1" -lt 10 ] 2>/dev/null && [ -z "${used[$1]}" ]; then
+        k="$1"
+      else
+        for lt in {a..z}; do
+          [ "$lt" = q ] && continue
+          [ "$lt" = c ] && continue           # c 留给「配置」
+          [ -z "${used[$lt]}" ] && { k="$lt"; break; }
+        done
+      fi
+      [ -n "$k" ] && used[$k]=1
+      printf '%s' "$k"
+    }
+
+    add() {  # add <显示行> <键> <快照行>
+      items+=("$1" "$2" "run-shell \"$SELF conn $idx\"")
+      snap+="$3"$'\n'
+      idx=$((idx+1))
+    }
+
+    # 快照: by-id路径 \t 短名 \t 标签; 分隔用 tab(标签含空格)
+    # 键与行序都锚 tty 编号: 按 (前缀, 编号数字) 排; 两遍循环算 vendor+产品名逐词列宽
+    mapfile -t links < <(
+      for l in /dev/serial/by-id/*; do
+        [ -e "$l" ] || continue
+        t=$(readlink -f "$l"); t=${t##*/}
+        pre="${t%%[0-9]*}"
+        printf '%s\t%d\t%s\n' "$pre" "$((10#${t#"$pre"}))" "$l"
+      done | sort -t$'\t' -k1,1 -k2,2n
+    )
+    rows=(); wls=(); cvw=0; aw=0
+    while IFS=$'\t' read -r _ num l; do
+      IFS=$'\t' read -r short vend prod ifn < <(parse_byid "$l")
+      tty=$(readlink -f "$l"); tty=${tty##*/}
+      al=$(kv_get @ts_alias "$short")
+      [ -n "$al" ] && (( ${#al} + 2 > aw )) && aw=$((${#al} + 2))
+      rows+=("$l"$'\t'"$short"$'\t'"$vend"$'\t'"$prod"$'\t'"$ifn"$'\t'"$tty"$'\t'"$al")
+      read -ra ws <<< "$vend $prod"      # vendor 并入首词列
+      for j in "${!ws[@]}"; do
+        (( ${#ws[$j]} > ${wls[$j]:-0} )) && wls[$j]=${#ws[$j]}
+      done
+      cv="${vend%%.*}"                   # 紧凑用短 vendor (wch.cn → wch)
+      (( ${#cv} > cvw )) && cvw=${#cv}
+    done < <(printf '%s\n' "${links[@]}")
+
+    # 共享会话: 行内 ◎端口 标记 + 底部挂载区
+    declare -A shport_of=(); shrows=()
+    while IFS=$'\t' read -r sport sdev stty sbaud; do
+      [ -n "$sport" ] || continue
+      shport_of["$stty"]="$sport"
+      case "$sdev" in
+        /dev/serial/by-id/*)
+          IFS=$'\t' read -r _sshort _sv _sp _si < <(parse_byid "$sdev"); sname="$_sp${_si:+ $_si}" ;;
+        *) sname="$sdev" ;;
+      esac
+      shrows+=("$sport"$'\t'"$sname"$'\t'"$stty")
+    done < <(sh_sessions)
+
+    for r in "${rows[@]}"; do
+      IFS=$'\t' read -r l short vend prod ifn tty al <<< "$r"
+      k=$(keyfor "$((10#${tty#"${tty%%[0-9]*}"}))")
+      [ -z "$k" ] && continue            # 键耗尽, 静默截断
+      if [ -n "$(tio_pane "$l")" ]; then m="● "; else m="  "; fi
+      disp="$(fmt_disp wls "$cw" "$aw" "$cvw" "$vend" "$prod" "$ifn" "$tty" "$al")"
+      disp+="${shport_of[$tty]:+ ◎${shport_of[$tty]}}"
+      add "$m$disp" "$k" "$l"$'\t'"$short"$'\t'"$prod${ifn:+ $ifn}"
+    done
+    if [ -z "$snap" ]; then
+      msg "未发现串口设备 (/dev/serial/by-id/)"
+      exit 0
+    fi
+    tmux set -g @ts_menu "$snap"
+    if [ ${#shrows[@]} -gt 0 ]; then     # 挂载区: 端口↔串口映射 + 一键 nc 围观
+      hks="hijklmn"
+      items+=("@SEP:共享中 · 挂载(nc) Ctrl-C 退@" "" "")
+      for sr in "${shrows[@]}"; do
+        IFS=$'\t' read -r sport sname stn <<< "$sr"
+        k="${hks:0:1}"; hks="${hks:1}"
+        [ -z "$k" ] && break
+        items+=("挂 $sport = $sname ($stn)" "$k" "run-shell \"$SELF attach $sport\"")
+      done
+    fi
+    items+=("@SEP:操作@" "" "")
+    items+=("配置… (选口改波特率/共享/命名)" "c" "run-shell \"$SELF cfgmnu\"")
+    fit_seps items " 串口 [$((idx-1))] › tio "
+    tmux display-menu -T " 串口 [$((idx-1))] › tio " -x C -y C \
+      "${items[@]}" "取消" q ""
+    ;;
+
+  conn)
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) ;;
+      *) line=$(tmux show -gv @ts_menu 2>/dev/null | sed -n "${2}p") ;;
+    esac
+    if [ -z "$line" ]; then
+      msg "端口快照缺失, 请重新触发"
+      cleanup
+      exit 0
+    fi
+    IFS=$'\t' read -r byid short label <<< "$line"
+    lp=$(tio_pane "$byid")
+    if [ -n "$lp" ]; then    # 已连接(含共享中): 跳到那个 pane (id 无空格, 名字 target 会截断)
+      tmux switch-client -t "$(tmux display -p -t "$lp" '#{session_id}:#{window_id}')" 2>/dev/null
+      tmux select-pane -t "$lp"
+      cleanup
+      exit 0
+    fi
+    # 无波特率参数: 总是弹配置菜单(档位/不设/自定义), 记忆仅作 ◂ 标记
+    if [ -z "${3:-}" ]; then
+      baud_menu conn "$2" "$byid" "$short" "$label"
+      exit 0
+    fi
+    b="$3"
+    case "$b" in
+      *[!0-9]*) msg "无效波特率: $b"; exit 0 ;;
+    esac
+    # 命令要敲进触发 pane 的 shell, pane 在跑别的(如 vim)时会敲乱, 拦下
+    cur=$(trig_shell)
+    if [ -z "$cur" ]; then
+      msg "当前 pane 不是 shell, 未连接"
+      cleanup
+      exit 0
+    fi
+    kv_set @ts_baud "$short" "$b"
+    cmd="tio"
+    [ "$b" != 0 ] && cmd+=" -b $b"
+    if [ "$(kv_get @ts_share "$short")" = 1 ]; then
+      t=$(readlink -f "$byid"); t=${t##*/}
+      cmd+=" -S inet:$(sh_port "$t")"
+    fi
+    tmux send-keys -t "$cur" "$cmd $byid" Enter
+    cleanup
+    ;;
+
+  cfgmnu)                                # 配置选口: 键=tty编号(与一级一致), 选中弹配置菜单
+    snap=$(tmux show -gv @ts_menu 2>/dev/null)
+    if [ -z "$snap" ]; then msg "快照缺失, 请重新触发"; exit 0; fi
+    # 行构造与主页一致(逐词 pad + 别名列): 先收集算列宽, 再拼行
+    cw=$(tmux display -p '#{client_width}' 2>/dev/null)
+    [ -z "$cw" ] && cw=$(tmux display -p -t "$(tmux show -gv @ts_trig 2>/dev/null)" '#{client_width}' 2>/dev/null)
+    crows=(); wls=(); cvw=0; aw=0; ln=0
+    while IFS=$'\t' read -r cbyid cshort _cl; do
+      [ -z "$cbyid" ] && continue
+      IFS=$'\t' read -r short vend prod ifn < <(parse_byid "$cbyid")
+      ct=$(readlink -f "$cbyid"); ct=${ct##*/}
+      al=$(kv_get @ts_alias "$short")
+      [ -n "$al" ] && (( ${#al} + 2 > aw )) && aw=$((${#al} + 2))
+      crows+=("$cbyid"$'\t'"$short"$'\t'"$vend"$'\t'"$prod"$'\t'"$ifn"$'\t'"$ct"$'\t'"$al")
+      read -ra ws <<< "$vend $prod"
+      for j in "${!ws[@]}"; do
+        (( ${#ws[$j]} > ${wls[$j]:-0} )) && wls[$j]=${#ws[$j]}
+      done
+      cv="${vend%%.*}"
+      (( ${#cv} > cvw )) && cvw=${#cv}
+    done <<< "$snap"
+    citems=()
+    for cr in "${crows[@]}"; do
+      ln=$((ln+1))
+      IFS=$'\t' read -r cbyid short vend prod ifn ct al <<< "$cr"
+      cn=$(tty_num "$ct")
+      if [ "$cn" -lt 10 ] 2>/dev/null; then ck="$cn"
+      else ck=$(awk -v n="$cn" 'BEGIN{printf "%c", 87+n}'); fi   # 10→a, 11→b…
+      citems+=("$(fmt_disp wls "$cw" "$aw" "$cvw" "$vend" "$prod" "$ifn" "$ct" "$al")" "$ck" "run-shell \"$SELF cfg $ln\"")
+    done <<< /dev/null
+    citems+=("@SEP:操作@" "" "")
+    fit_seps citems " 配置哪个口 "
+    tmux display-menu -T " 配置哪个口 " -x C -y C \
+      "${citems[@]}" "返回" "b" "run-shell \"$SELF start\"" "取消" q ""
+    ;;
+
+  cfg)                                    # 配置模式: 强制弹配置菜单(一键直连的改口)
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) ;;
+      *) line=$(tmux show -gv @ts_menu 2>/dev/null | sed -n "${2}p") ;;
+    esac
+    if [ -z "$line" ]; then msg "端口快照缺失, 请重新触发"; exit 0; fi
+    IFS=$'\t' read -r byid short label <<< "$line"
+    baud_menu cfg "$2" "$byid" "$short" "$label"
+    ;;
+
+  shmenu)                                # 分步第③步: 共享开/关 → 连接
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) ;;
+      *) line=$(tmux show -gv @ts_menu 2>/dev/null | sed -n "${2}p") ;;
+    esac
+    [ -z "$line" ] && { msg "端口快照缺失, 请重新触发"; exit 0; }
+    IFS=$'\t' read -r byid short label <<< "$line"
+    t=$(readlink -f "$byid"); t=${t##*/}
+    sport=$((SHBASE + $(tty_num "$t")))
+    if [ "$(kv_get @ts_share "$short")" = 1 ]; then
+      on="共享: 开 ($sport) ◂"; off="共享: 关"
+    else
+      on="共享: 开 ($sport)"; off="共享: 关 ◂"
+    fi
+    sitems=()
+    sitems+=("$on"  "1" "run-shell \"$SELF share $2 $3 1\"")
+    sitems+=("$off" "0" "run-shell \"$SELF share $2 $3 0\"")
+    sitems+=("@SEP:操作@" "" "")
+    sitems+=("返回" "b" "run-shell \"$SELF conn $2\"")
+    fit_seps sitems " $label @ 共享 "
+    # 光标推到当前偏好行(关=第二行, 1 Down); 须在阻塞的 display-menu 之前 fork
+    if [ "$(kv_get @ts_share "$short")" != 1 ]; then
+      ( sleep 0.1; tmux send-keys -K -t "$(tmux show -gv @ts_trig 2>/dev/null)" Down ) &
+    fi
+    tmux display-menu -T " $label @ 共享 " -x C -y C \
+      "${sitems[@]}" "取消" "q" ""
+    ;;
+
+  share)                                 # 记共享偏好 → 连接
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) ;;
+      *) line=$(tmux show -gv @ts_menu 2>/dev/null | sed -n "${2}p") ;;
+    esac
+    [ -z "$line" ] && exit 0
+    IFS=$'\t' read -r _byid short _label <<< "$line"
+    if [ "${4:-}" = 1 ]; then kv_set @ts_share "$short" 1
+    else kv_set @ts_share "$short" -; fi
+    exec "$SELF" conn "$2" "$3"
+    ;;
+
+  setbaud)                               # 配置入口: 存波特率记忆(不连接)
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) ;;
+      *) line=$(tmux show -gv @ts_menu 2>/dev/null | sed -n "${2}p") ;;
+    esac
+    [ -z "$line" ] && exit 0
+    IFS=$'\t' read -r _byid short label <<< "$line"
+    case "${3:-}" in ''|*[!0-9]*) exit 0 ;; esac
+    kv_set @ts_baud "$short" "$3"
+    msg "$label: 波特率已存 $3"
+    ;;
+
+  shswap)                                 # 切共享开关后重弹配置菜单
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) exit 0 ;;
+      *) line=$(tmux show -gv @ts_menu 2>/dev/null | sed -n "${2}p") ;;
+    esac
+    [ -z "$line" ] && exit 0
+    IFS=$'\t' read -r _byid short _label <<< "$line"
+    if [ "$(kv_get @ts_share "$short")" = 1 ]; then kv_set @ts_share "$short" -
+    else kv_set @ts_share "$short" 1; fi
+    exec "$SELF" cfg "$2"
+    ;;
+
+  name)                                   # 设置/清除别名后重弹一级菜单
+    line=""
+    case "${2:-}" in
+      ''|*[!0-9]*) exit 0 ;;
+      *) line=$(tmux show -gv @ts_menu 2>/dev/null | sed -n "${2}p") ;;
+    esac
+    [ -z "$line" ] && exit 0
+    IFS=$'\t' read -r _byid short _label <<< "$line"
+    case "${3:-}" in
+      *" "*) msg "别名不能含空格"; exit 0 ;;
+    esac
+    if [ -n "${3:-}" ]; then kv_set @ts_alias "$short" "$3"
+    else kv_set @ts_alias "$short" -; fi
+    exec "$SELF" start
+    ;;
+
+  alias)                                  # CLI: tmux-serial alias <短名> <别名|->
+    if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+      for e in $(tmux show -gv @ts_alias 2>/dev/null); do echo "${e%%=*}=${e#*=}"; done
+      exit 0
+    fi
+    kv_set @ts_alias "$2" "$3"
+    ;;
+
+  attach)                                 # nc 挂载共享端口到触发 pane
+    case "${2:-}" in ''|*[!0-9]*) exit 0 ;; esac
+    cur=$(trig_shell)
+    if [ -z "$cur" ]; then msg "当前 pane 不是 shell, 未挂载"; exit 0; fi
+    tmux send-keys -t "$cur" "nc 127.0.0.1 $2" Enter
+    ;;
+
+  map)                                    # 全状态 TSV: 别名/端口/标签/tty/by-id/状态
+    # 一次扫全部 tio 进程, 按 tty 归一: connected/shared 都带波特率(对称)
+    declare -A mport=() mbaud=() mconn=()
+    for pid in $(pgrep -x tio); do
+      cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
+      dev=$(printf '%s' "$cmd" | awk '{print $NF}')
+      tty=$(readlink -f "$dev" 2>/dev/null); tty=${tty##*/}
+      [ -n "$tty" ] || continue
+      baud=$(printf '%s' "$cmd" | grep -o '\-b [0-9]\+' | awk '{print $2}')
+      port=$(printf '%s' "$cmd" | grep -o 'inet:[0-9]\+' | head -1 | cut -d: -f2)
+      if [ -n "$port" ]; then mport["$tty"]="$port"
+      else mconn["$tty"]=1; fi
+      mbaud["$tty"]="${baud:-default}"
+    done
+    for l in /dev/serial/by-id/*; do
+      [ -e "$l" ] || continue
+      IFS=$'\t' read -r short vend prod ifn < <(parse_byid "$l")
+      tty=$(readlink -f "$l"); tty=${tty##*/}
+      al=$(kv_get @ts_alias "$short"); al=${al:--}
+      if [ -n "${mport[$tty]}" ]; then state="shared(${mbaud[$tty]})"; port="${mport[$tty]}"
+      elif [ -n "${mconn[$tty]}" ]; then state="connected(${mbaud[$tty]})"; port="-"
+      else state="idle"; port="-"; fi
+      printf '%s\t%s\t%s %s\t%s\t%s\t%s\n' \
+        "$al" "$port" "$prod" "$ifn" "$tty" "$l" "$state"
+    done
+    ;;
+esac

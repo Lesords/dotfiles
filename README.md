@@ -215,6 +215,8 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Normal | Ctrl + Alt + p | Last window     |
 | Normal | Ctrl + Alt + z | Toggle pane zoom |
 | Normal | Prefix + e     | Cycle mode: off → resize → layout → off |
+| Normal | Prefix + Ctrl + m | Move pane/window to another session (tmux-move-to) |
+| Normal | Prefix + u     | Serial connect menu: port → baud → share → tio (tmux-serial) |
 | Resize | h/j/k/l | Resize pane by 5 (left/down/up/right) |
 | Resize | H/J/K/L | Resize pane by 20 (left/down/up/right) |
 | Resize | z       | Zoom pane toggle |
