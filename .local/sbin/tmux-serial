@@ -38,7 +38,7 @@ parse_byid() {
   b="${b#usb-}"; b="${b#*_}"              # 去 vendor 字段
   b="${b%-port[0-9]*}"                    # FTDI/CP210x 系尾部多 -portN, 先剥
   ifn=$(printf '%s' "$b" | grep -o 'if[0-9]*$')
-  [ -n "$ifn" ] && b="${b%_$ifn}"
+  [ -n "$ifn" ] && b="${b%[-_]$ifn}"      # 分隔符是 - 或 _(wch 靠去序列号歪打正着, 无序列号设备会残留)
   b="${b%_*}"                             # 去序列号
   prod="${b//_/ }"; prod="${prod#USB }"
   printf '%s%s\t%s\t%s\t%s' "${prod// /}" "${ifn:+-$ifn}" "$vend" "$prod" "$ifn"
@@ -139,6 +139,11 @@ fmt_disp() {  # <wls数组名> <cw> <aw> <cvw> <vend> <prod> <ifn> <tty> <alias>
   else
     pad=""
     for j in "${!ws[@]}"; do pad+=$(printf '%-*s  ' "${wl[$j]}" "${ws[$j]}"); done
+    # 词数不足全局列数的行补空到词区总宽, if 列对齐(设备产品名词数可不同, 如无序列号的 BeagleBone)
+    for ((j=${#ws[@]}; j<${#wl[@]}; j++)); do
+      printf -v sp '%*s  ' "${wl[$j]}"
+      pad+="$sp"
+    done
     disp="$pad$ifn › $tty"
   fi
   [ "$aw" -gt 0 ] && disp="$(printf '[%-*s] ' "$((aw-2))" "$al")$disp"
