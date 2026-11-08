@@ -1,0 +1,969 @@
+#!/usr/bin/env python3
+"""
+pi-sessions — 交互式浏览/恢复 pi session
+
+用法:
+  pi-sessions             打开 fzf 交互式选择器（带 preview）
+  pi-sessions list        列出所有 session
+  pi-sessions view <id>   查看 session 完整对话
+  pi-sessions info <id>   查看 session 详细信息
+  pi-sessions search <kw> 搜索 session
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import textwrap
+import time
+import unicodedata
+from datetime import datetime
+from pathlib import Path
+
+# ── config ────────────────────────────────────────────────────────────────────
+
+PI_SESSIONS = Path.home() / ".pi" / "agent" / "sessions"
+HELP_FLAG = "/tmp/.pi-sessions-help"
+SCOPE_FLAG = "/tmp/.sessions-scope"   # shared with claude/codex-sessions
+
+# Markdown renderer — glow > bat > plain text
+_MD_RENDERER: tuple | None = None
+for _cmd in ("glow", "bat"):
+    if _p := shutil.which(_cmd):
+        _MD_RENDERER = (_cmd, _p)
+        break
+
+# leading ANSI SGR escapes glow prefixes before the text margin
+_LEADING_ANSI = re.compile(r'^(?:\x1b\[[0-9;]*m)*')
+
+# ── ANSI colors ───────────────────────────────────────────────────────────────
+
+CYAN    = "\033[38;5;45m"
+MAGENTA = "\033[38;5;201m"
+GRAY    = "\033[38;5;242m"
+GREEN   = "\033[38;5;84m"
+YELLOW  = "\033[38;5;220m"
+WHITE   = "\033[38;5;252m"
+BOLD    = "\033[1m"
+RESET   = "\033[0m"
+
+BG_BLUE  = "\033[48;5;24m"
+BG_GREEN = "\033[48;5;22m"
+BG_GRAY  = "\033[48;5;236m"
+
+_BADGE_YOU = f"{BG_BLUE}{CYAN}  You  {RESET}"
+_BADGE_CLAUDE = f"{BG_GREEN}{GREEN} Claude {RESET}"
+_BADGE_TOOL = f"{BG_GRAY}{YELLOW} Tool {RESET}"
+
+
+def col(s, c):
+    return f"{c}{s}{RESET}"
+
+
+# ── project dir decode ───────────────────────────────────────────────────────
+
+def decode_project_dir(encoded: str) -> Path | None:
+    raw = encoded.lstrip("-").replace("--", "-\x00")
+    parts = []
+    for token in raw.split("-"):
+        if token.startswith("\x00"):
+            parts.append("." + token[1:])
+        elif token:
+            parts.append(token)
+
+    def match(base, tokens):
+        if not tokens:
+            return base
+        for w in range(1, len(tokens) + 1):
+            c = "-".join(tokens[:w])
+            cand = base / c
+            if cand.exists():
+                r = match(cand, tokens[w:])
+                if r is not None:
+                    return r
+        return None
+
+    r = match(Path("/"), parts)
+    return r if r else (Path("/") / "/".join(parts) if parts else None)
+
+
+# ── jsonl parsing ─────────────────────────────────────────────────────────────
+
+def parse_lines(chunk: str) -> list[dict]:
+    """Parse jsonl text line-by-line, tolerating crash-torn lines: a session
+    killed mid-write leaves a truncated/NUL-padded tail — skip bad lines
+    instead of discarding the whole file."""
+    out = []
+    for l in chunk.split("\n"):
+        l = l.strip()
+        if not l:
+            continue
+        try:
+            out.append(json.loads(l))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def parse_jsonl(path: Path) -> list[dict]:
+    try:
+        with open(path, errors="replace") as f:
+            return parse_lines(f.read())
+    except OSError:
+        return []
+
+
+def first_message(entries: list[dict]) -> str:
+    """First real user message (normalized to single line). pi has no title
+    entries, so this doubles as the display title."""
+    for d in entries:
+        if d.get("type") != "message":
+            continue
+        m = d.get("message", {})
+        if m.get("role") != "user":
+            continue
+        content = m.get("content", [])
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+        for b in (content if isinstance(content, list) else []):
+            if isinstance(b, dict) and b.get("type") == "text":
+                t = b.get("text", "").strip()
+                if t and not t.startswith("<"):
+                    return " ".join(t.split())
+    return ""
+
+
+def msg_uuids(entries: list[dict]) -> set:
+    """Entry ids of all message entries — overlap reveals fork vs compact.
+    (Key named 'uuids' for parity with claude-sessions.)"""
+    return {d["id"] for d in entries
+            if d.get("type") == "message" and d.get("id")}
+
+
+def count_messages(entries: list[dict]) -> dict:
+    c = {"user": 0, "assistant": 0, "toolResult": 0, "other": 0}
+    for d in entries:
+        if d.get("type") == "message":
+            role = (d.get("message") or {}).get("role", "other")
+            if role not in ("user", "assistant", "toolResult"):
+                role = "other"
+        else:
+            role = "other"
+        c[role] = c.get(role, 0) + 1
+    return c
+
+
+def render_markdown(text: str, width: int = 72) -> str:
+    if not _MD_RENDERER:
+        return text
+    kind, cmd = _MD_RENDERER
+    if kind == "glow":
+        args = ["-", "--style=dark", f"--width={width}"]
+    else:  # bat
+        args = ["--style=plain", "--color=always", f"--terminal-width={width}"]
+    try:
+        r = subprocess.run([cmd, *args], input=text, capture_output=True, text=True, timeout=5)
+        out = r.stdout
+        if not out.strip():
+            return text
+        lines = out.split("\n")
+        # drop the blank lines glow pads at top/bottom
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        # glow renders every line with a 2-space left margin, but often
+        # prefixes the margin with ANSI styling (headings, wrapped inline-code).
+        # Strip the margin *after* any leading ANSI so text aligns with our
+        # indent; code / table / diagram relative indent is preserved (shifted
+        # left 2). Fixed-2 (not dedent's common-prefix) survives flush lines.
+        def _strip_margin(l):
+            pre = _LEADING_ANSI.match(l).group(0)
+            rest = l[len(pre):].rstrip()
+            if rest.startswith("  "):
+                rest = rest[2:]
+            return pre + rest
+        return "\n".join(_strip_margin(l) for l in lines) or text
+    except Exception:
+        return text
+
+
+_SENTINEL = "§§BLK§§"          # plain text to glow — survives verbatim for splitting
+_ANSI_ALL = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def render_markdown_batch(texts: list[str], width: int = 72) -> list[str]:
+    """Render many texts in ONE glow subprocess: join with a sentinel glow
+    emits verbatim, render once, split back apart. Falls back to one
+    render_markdown call per text if the split count doesn't match."""
+    if not texts:
+        return []
+    if not _MD_RENDERER:
+        return list(texts)
+    kind, cmd = _MD_RENDERER
+    args = (["-", "--style=dark", f"--width={width}"] if kind == "glow"
+            else ["--style=plain", "--color=always",
+                  f"--terminal-width={width}"])
+    joined = f"\n\n{_SENTINEL}\n\n".join(texts)
+    try:
+        r = subprocess.run([cmd, *args], input=joined, capture_output=True,
+                           text=True, timeout=15)
+        out = r.stdout
+    except Exception:
+        out = ""
+    segs: list[list[str]] = [[]]
+    for ln in out.split("\n"):
+        if _ANSI_ALL.sub("", ln).strip() == _SENTINEL:
+            segs.append([])
+        else:
+            segs[-1].append(ln)
+    if not out.strip() or len(segs) != len(texts):
+        return [render_markdown(t, width) for t in texts]
+    # strip each segment's padding + 2-space margin (mirrors render_markdown's
+    # _strip_margin — keep in sync).
+    result = []
+    for i, s in enumerate(segs):
+        while s and not s[0].strip():
+            s.pop(0)
+        while s and not s[-1].strip():
+            s.pop()
+        stripped = []
+        for l in s:
+            pre = _LEADING_ANSI.match(l).group(0)
+            rest = l[len(pre):].rstrip()
+            if rest.startswith("  "):
+                rest = rest[2:]
+            stripped.append(pre + rest)
+        result.append("\n".join(stripped) or texts[i])
+    return result
+
+
+# ── width-aware text helpers (CJK-safe) ──────────────────────────────────────
+
+_PREVIEW_INDENT = 7   # spaces prepended to each rendered content line
+_RESULT_LINES = 5     # cap lines shown for a single tool result
+_PREVIEW_TURNS = 8    # only render the last N user-initiated turns in preview
+
+
+def _preview_width(default: int = 72) -> int:
+    """Real preview-pane column count, injected by fzf via env."""
+    v = os.environ.get("FZF_PREVIEW_COLUMNS")
+    if v and v.lstrip("-").isdigit() and int(v) > 0:
+        return int(v)
+    return default
+
+
+def _disp_width(s: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
+def _wrap_text(text: str, width: int) -> list[str]:
+    """Wrap to a display width, preserving explicit newlines (CJK-safe)."""
+    width = max(width, 4)
+    out: list[str] = []
+    for para in text.split("\n"):
+        line, w = "", 0
+        for ch in para:
+            cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+            if w + cw > width and line:
+                out.append(line)
+                line, w = ch, cw
+            else:
+                line, w = line + ch, w + cw
+        out.append(line)
+    return out
+
+
+def _truncate(text: str, width: int) -> str:
+    if _disp_width(text) <= width:
+        return text
+    out, w = "", 0
+    for ch in text:
+        cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if w + cw + 1 > width:
+            break
+        out, w = out + ch, w + cw
+    return out + "…"
+
+
+def _tool_input_summary(name: str, inp) -> str:
+    """Pick the most relevant field of a toolCall's arguments for a one-line
+    summary. pi builtin tools: bash/read/edit/write."""
+    if not isinstance(inp, dict):
+        return ""
+    fields = {
+        ("bash",): "command",
+        ("read", "edit", "write"): "path",
+    }
+    field = next((f for keys, f in fields.items() if name in keys), None)
+    if field:
+        v = inp.get(field)
+        if isinstance(v, str) and v.strip():
+            return " ".join(v.split())
+    for v in inp.values():  # fallback: first non-empty string value
+        if isinstance(v, str) and v.strip():
+            return " ".join(v.split())
+    return ""
+
+
+def session_age(mtime: float) -> str:
+    s = int(time.time() - mtime)
+    if s < 60: return "now"
+    if s < 3600: return f"{s // 60}m"
+    if s < 86400: return f"{s // 3600}h"
+    return f"{s // 86400}d"
+
+
+def format_time(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
+
+
+# ── summary cache + window scan (fast list path) ──────────────────────────────
+# Mirrors claude-sessions' strategy:
+#   display   ← head/tail window: first message lives at the head; the latest
+#               session_info name (-n / TUI rename) near the tail
+#   uuids     ← pi entry ids; only same-display groups use them (fork/compact)
+#   counts    ← only list/info show them
+# uuids/counts come from a cache keyed by (mtime, size) and are rebuilt by
+# full-parsing just the files that need them.
+
+CACHE_VERSION = 1
+_WINDOW = 65536        # head scan window per file
+_HEAD_MAX = 1 << 20    # rare: first message beyond the window — extend head
+
+
+def _cache_path() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    return Path(base) / "pi-sessions" / "index.json"
+
+
+def _cache_load() -> dict:
+    try:
+        with open(_cache_path()) as f:
+            c = json.load(f)
+        return c if c.get("version") == CACHE_VERSION else {}
+    except Exception:
+        return {}   # missing/corrupt → cold rebuild
+
+
+def _cache_save(cache: dict):
+    try:
+        p = _cache_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(cache, f, separators=(",", ":"))
+        os.replace(tmp, p)   # atomic; concurrent pickers last-write-wins
+    except OSError:
+        pass   # cache is best-effort — never block the picker
+
+
+def _latest_name(entries: list[dict]) -> str:
+    """Latest session_info name — -n and TUI renames both append one; the
+    last entry wins (mirrors claude-sessions' title priority)."""
+    names = [d["name"].strip() for d in entries
+             if d.get("type") == "session_info" and d.get("name", "").strip()]
+    return " ".join(names[-1].split()) if names else ""
+
+
+def _display_scan(f: Path, sz: int) -> tuple[str, str, str]:
+    """(display, first_msg, cwd) from the head/tail window only — no full parse."""
+    with open(f, errors="replace") as fh:
+        head = parse_lines(fh.read(_WINDOW))
+        tail = []
+        if sz > 2 * _WINDOW:
+            fh.seek(max(0, sz - _WINDOW))
+            tail = parse_lines(fh.read())
+    win = head + tail   # file order: a rename near the tail is the true name
+    display = _latest_name(win)
+    msg = first_message(head)
+    if not display and not msg and sz > _WINDOW:
+        with open(f, errors="replace") as fh:   # first message deep in file
+            msg = first_message(parse_lines(fh.read(_HEAD_MAX)))
+    # session entry carries the original unencoded cwd — authoritative path
+    cwd = next((d.get("cwd") for d in win if d.get("cwd")), "")
+    return display or msg, msg, cwd
+
+
+def _lazy_fill(sessions: list[dict], files: dict, need_counts: bool) -> bool:
+    """Full-parse (and cache) only sessions whose data is actually used:
+    same-display group members (fork/compact id overlap) or, when a caller
+    shows counts, everything without them. Returns True if cache changed."""
+    groups: dict[tuple, int] = {}
+    for s in sessions:
+        k = (s["project_short"], s["display"])
+        groups[k] = groups.get(k, 0) + 1
+    dirty = False
+    for s in sessions:
+        grouped = groups[(s["project_short"], s["display"])] > 1
+        if s["uuids"] is None:
+            s["uuids"] = set()
+        needs_parse = s["counts"] is None and (grouped or need_counts)
+        if s["counts"] is None:
+            s["counts"], s["total_msgs"] = {}, 0
+        if not needs_parse:
+            continue
+        entries = parse_jsonl(s["path"])
+        if grouped:
+            s["uuids"] = msg_uuids(entries)
+        s["counts"] = count_messages(entries)
+        s["total_msgs"] = sum(s["counts"].values())
+        files[str(s["path"])] = {
+            "mtime": s["mtime"], "size": s["path"].stat().st_size,
+            "uuids": sorted(s["uuids"]), "counts": s["counts"],
+        }
+        dirty = True
+    return dirty
+
+
+def collect_sessions(need_counts: bool = False):
+    """need_counts=True forces full-parse for msg counts (list/info); the
+    picker doesn't show counts and stays on the fast head-window path."""
+    if not PI_SESSIONS.exists():
+        return []
+    cache = _cache_load()
+    cache["version"] = CACHE_VERSION   # _cache_load rejects other versions
+    files = cache.setdefault("files", {})
+    sessions = []
+
+    for p in sorted(PI_SESSIONS.iterdir()):
+        if not p.is_dir():
+            continue
+        guess = decode_project_dir(p.name)   # fallback when cwd is missing
+        for f in sorted(p.glob("*.jsonl"),
+                        key=lambda x: x.stat().st_mtime, reverse=True):
+            st = f.stat()
+            hit = files.get(str(f))
+            if hit and hit["mtime"] == st.st_mtime and hit["size"] == st.st_size:
+                uuids, counts = set(hit["uuids"]), hit["counts"]
+            else:
+                uuids, counts = None, None   # pending lazy full parse
+            display, msg, cwd = _display_scan(f, st.st_size)
+            if not display:
+                continue
+            # prefer the original unencoded cwd from the file itself over the
+            # lossy encoded-dir decode
+            real = Path(cwd) if cwd else (guess or Path())
+            rs = str(real)
+            short = rs.replace(str(Path.home()), "~") if rs not in ("", "/") else "?"
+            # pi filenames: <timestamp>_<uuid>.jsonl — the prefix gives the
+            # true creation time, the uuid tail is the session id
+            stem = f.stem
+            created, _, sid = stem.partition("_")
+            sessions.append({
+                "sid": sid or stem, "project": real, "created": created,
+                "uuids": uuids,
+                "project_short": short, "first_msg": msg,
+                "display": display,
+                "mtime": st.st_mtime, "age": session_age(st.st_mtime),
+                "time": format_time(st.st_mtime),
+                "counts": counts, "total_msgs": sum(counts.values()) if counts else 0,
+                "path": f,
+            })
+
+    dirty = _lazy_fill(sessions, files, need_counts)
+    seen = {str(s["path"]) for s in sessions}
+    stale = [k for k in files if k not in seen]   # sessions deleted upstream
+    for k in stale:
+        del files[k]
+    if dirty or stale:
+        _cache_save(cache)
+    return sessions
+
+
+# ── picker output (for fzf) ──────────────────────────────────────────────────
+
+def _print_session_row(prefix: str, s: dict, kind: str | None = None):
+    d = s.get("display", s["first_msg"])
+    label = (d[:58] + "…") if len(d) > 58 else d
+    age_s = col(f"[{s['age']:>3}]", MAGENTA)
+    tag = f" {col(f'({kind})', GRAY)}" if kind else ""
+    print(f"{prefix}{age_s}  {col(label, WHITE)}{tag}  "
+          f"{col(os.path.basename(s['project_short']), GRAY)}\t{s['project_short']}\t{str(s['project'])}\t{s['sid']}")
+
+
+def emit_picker_lines():
+    """Print tab-delimited lines for fzf:  <display>\t<proj_short>\t<proj_path>\t<sid>"""
+    sessions = collect_sessions()
+    scope_on = not os.path.exists(SCOPE_FLAG)
+    cwd = Path.cwd()
+
+    # Filter by current directory when scope mode is on
+    if scope_on:
+        sessions = [s for s in sessions
+                    if str(cwd) in str(s["project"])]
+
+    # Header line (sticky via --header-lines=1)
+    scope_label = cwd.name if scope_on else "all"
+    print(col(f"  {scope_label}  |  ? toggle help", GRAY))
+    groups = {}
+    for s in sessions:
+        groups.setdefault(s["project_short"], []).append(s)
+
+    for proj, convs in groups.items():
+        count = len(convs)
+        print(f"  {col(proj, CYAN)}  {col(f'({count})', GRAY)}")
+        # same-named segments (compact forks) nest under the newest one
+        tops: list[tuple[dict, list[dict]]] = []
+        idx_of: dict[str, int] = {}
+        for s in convs:
+            key = s.get("display", s["first_msg"])
+            if key in idx_of:
+                tops[idx_of[key]][1].append(s)
+            else:
+                idx_of[key] = len(tops)
+                tops.append((s, []))
+        for i, (s, dups) in enumerate(tops):
+            last = i == len(tops) - 1
+            _print_session_row("  └─ " if last else "  ├─ ", s)
+            stem = "    " if last else "│   "
+            for j, d in enumerate(dups):
+                sub = "└─ " if j == len(dups) - 1 else "├─ "
+                # fork: real message overlap with the newest segment
+                # (full or mid-point copy); compact: summary restart, ~none
+                du, tu = d.get("uuids", set()), s.get("uuids", set())
+                kind = "fork" if len(du & tu) > 0.1 * max(len(du), 1) else "compact"
+                _print_session_row(f"  {stem}{sub}", d, kind)
+
+
+# ── preview (called by fzf --preview) ────────────────────────────────────────
+
+def _show_help():
+    print(col("  Keybindings", BOLD))
+    print()
+    print(f"  {col('Enter', GREEN)}  resume session")
+    print(f"  {col('^A', GREEN)}     toggle scope")
+    print(f"  {col('^V', GREEN)}     toggle full preview")
+    print(f"  {col('J/K', GREEN)}   scroll preview")
+    print(f"  {col('g/G', GREEN)}   preview top/bottom")
+    print(f"  {col('^D/^U', GREEN)} preview half-page")
+    print(f"  {col('/', GREEN)}     toggle preview pane")
+    print(f"  {col('?', GREEN)}     toggle this help")
+    print(f"  {col('^C/^Q', GREEN)} close picker")
+    print()
+    print(col("  Select a session to preview", GRAY))
+
+
+def _has_real_text(d: dict) -> bool:
+    """Whether a user message carries real user text (not a system wrapper)."""
+    content = (d.get("message") or {}).get("content", [])
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    return any(
+        isinstance(b, dict) and b.get("type") == "text"
+        and (t := b.get("text", "").strip()) and not t.startswith("<")
+        for b in (content if isinstance(content, list) else [])
+    )
+
+
+def render_preview(project_short: str, sid: str):
+    """Render session content to stdout (for fzf preview pane)."""
+    help_on = os.path.exists(HELP_FLAG)
+
+    if help_on:
+        _show_help()
+        return
+
+    if not sid or not project_short:
+        return
+
+    jsonl = None
+    for p in PI_SESSIONS.iterdir():
+        if not p.is_dir():
+            continue
+        cand = next(p.glob(f"*_{sid}.jsonl"), None)
+        if cand:
+            jsonl = cand
+            break
+    if not jsonl:
+        print(col("Session file not found", MAGENTA))
+        return
+
+    entries = parse_jsonl(jsonl)
+    if not entries:
+        return
+
+    print(col(f" {project_short}", CYAN))
+    print(col(f" {sid[:8]}…", GRAY))
+    print()
+
+    content_w = max(20, _preview_width() - _PREVIEW_INDENT)
+
+    # Keep preview bounded: render only the last N user-initiated turns
+    # (a turn = a real user message + everything that follows it, so each
+    # turn's full tool chain stays intact). The message-count summary below
+    # still reflects the whole session.
+    conv = [d for d in entries if d.get("type") == "message"]
+    turn_starts = [i for i, d in enumerate(conv)
+                   if (d.get("message") or {}).get("role") == "user"
+                   and _has_real_text(d)]
+    start = turn_starts[-_PREVIEW_TURNS] if len(turn_starts) >= _PREVIEW_TURNS else 0
+    if start > 0:
+        print(col(f" … last {_PREVIEW_TURNS} of {len(turn_starts)} turns ", GRAY))
+        print()
+
+    # Pass 1: render each message entry into (role, lines).
+    rendered: list[tuple[str, str | None, list[str]]] = []
+    pending: list[str] = []   # markdown texts queued for one-shot batch render
+    for d in conv[start:]:
+        m = d.get("message", {})
+        role = m.get("role")
+        content = m.get("content", [])
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+
+        if role == "toolResult":
+            role_label = _BADGE_TOOL
+        elif role == "user":
+            role_label = _BADGE_YOU if _has_real_text(d) else _BADGE_TOOL
+        else:
+            role_label = _BADGE_CLAUDE
+
+        lines: list[str] = []
+        kind: str | None = None
+        for block in (content if isinstance(content, list) else []):
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if kind is None:
+                kind = btype
+            if btype == "thinking":
+                lines.append(col("▎thinking…", GRAY))
+            elif btype == "toolCall":
+                name = block.get("name", "?")
+                summary = _tool_input_summary(name, block.get("arguments", {}))
+                label = f"[{name}]" + (f"  {summary}" if summary else "")
+                lines.append(col(_truncate(label, content_w), GRAY))
+            elif btype == "text":
+                text = block.get("text", "").strip()
+                if not text or text.startswith("<"):
+                    continue
+                if role == "toolResult":
+                    # tool output — plain gray, capped (not markdown-rendered)
+                    lines.extend(col(l, GRAY)
+                                 for l in _wrap_text(text, content_w)[:_RESULT_LINES])
+                else:
+                    # placeholder — expanded into rendered lines after the loop
+                    lines.append(f"\x00MD\x00{len(pending)}")
+                    pending.append(text)
+        if role == "toolResult":
+            kind = "toolResult"   # keep the text-blank-line rule from firing
+        if lines:
+            rendered.append((role_label, kind, lines))
+
+    # Resolve the markdown placeholders in one glow subprocess instead of
+    # one per text block. Each placeholder ("\x00MD\x00{idx}") expands to the
+    # rendered lines of pending[idx].
+    if pending:
+        md = render_markdown_batch(pending, content_w)
+        for i, (role_label, kind, ls) in enumerate(rendered):
+            if not any(l.startswith("\x00MD\x00") for l in ls):
+                continue
+            new: list[str] = []
+            for l in ls:
+                if l.startswith("\x00MD\x00"):
+                    new.extend(md[int(l[4:])].split("\n"))
+                else:
+                    new.append(l)
+            rendered[i] = (role_label, kind, new)
+
+    # Pass 2: one badge per run of consecutive same-role entries.
+    cur_role = None
+    prev_kind = None
+    for role_label, kind, lines in rendered:
+        if role_label != cur_role:
+            if cur_role is not None:
+                print()
+            print(f" {role_label}")
+            cur_role = role_label
+            prev_kind = None
+        elif prev_kind == "text" and kind == "text":
+            print("       ")   # blank between consecutive body-text entries
+        for l in lines:
+            print(f"       {l}")
+        prev_kind = kind
+    if cur_role is not None:
+        print()
+
+    # summary line
+    c = count_messages(entries)
+    total = sum(c.values())
+    summary = f"── {total} msgs ({c['user']} user / {c['assistant']} asst / {c['toolResult']} tool) ──"
+    print(col(summary, GRAY))
+
+
+# ── commands ──────────────────────────────────────────────────────────────────
+
+def cmd_list():
+    sessions = collect_sessions(need_counts=True)
+    if not sessions:
+        print("No sessions found.")
+        return
+    groups = {}
+    for s in sessions:
+        groups.setdefault(s["project_short"], []).append(s)
+    for proj, convs in groups.items():
+        print(f"  {col(proj, CYAN)}  {col(f'({len(convs)})', GRAY)}")
+        for s in convs:
+            d = s.get("display", s["first_msg"])
+            label = (d[:58] + "…") if len(d) > 58 else d
+            age_s = col(f"[{s['age']:>3}]", MAGENTA)
+            msgs_s = f"{s['total_msgs']} msgs"
+            print(f"    {age_s}  {col(label, WHITE)}")
+            print(f"           {col(s['sid'], GRAY)}  {col(msgs_s, GRAY)}")
+
+
+def _created_str(s: dict) -> str:
+    """True creation time from the filename timestamp prefix."""
+    try:
+        return datetime.strptime(s["created"],
+                                 "%Y-%m-%dT%H-%M-%S-%fZ").strftime("%m-%d %H:%M")
+    except ValueError:
+        return s["time"]
+
+
+def cmd_info(sid: str):
+    sessions = collect_sessions(need_counts=True)
+    match = [s for s in sessions if s["sid"] == sid]
+    if not match:
+        print(f"Session {sid} not found.")
+        return
+    s = match[0]
+    model = next((f'{d.get("provider")}/{d.get("modelId")}'
+                  for d in reversed(parse_jsonl(s["path"]))
+                  if d.get("type") == "model_change"), "?")
+    print(f"  {col('Session ID', BOLD)}     {s['sid']}")
+    print(f"  {col('Project', BOLD)}        {s['project_short']}")
+    print(f"  {col('Created', BOLD)}        {_created_str(s)}  "
+          f"(active {s['time']}, {s['age']} ago)")
+    print(f"  {col('Model', BOLD)}          {model}")
+    print(f"  {col('Messages', BOLD)}       {s['total_msgs']} total  "
+          f"({s['counts']['user']} user / {s['counts']['assistant']} asst / "
+          f"{s['counts']['toolResult']} tool)")
+    print(f"  {col('File', BOLD)}           {s['path']}")
+    print()
+    print(f"  {col('First message:', BOLD)}")
+    for line in textwrap.wrap(s["first_msg"], width=72):
+        print(f"    {line}")
+
+
+def cmd_view(sid: str):
+    jsonl = None
+    for p in PI_SESSIONS.iterdir():
+        if not p.is_dir():
+            continue
+        cand = next(p.glob(f"*_{sid}.jsonl"), None)
+        if cand:
+            jsonl = cand
+            break
+    if not jsonl:
+        print(f"Session {sid} not found.")
+        return
+
+    entries = parse_jsonl(jsonl)
+    if not entries:
+        print("Empty session.")
+        return
+
+    for d in entries:
+        if d.get("type") != "message":
+            continue
+        m = d.get("message", {})
+        role = m.get("role")
+        content = m.get("content", [])
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+        texts = []
+        for c_ in (content if isinstance(content, list) else []):
+            if not isinstance(c_, dict):
+                continue
+            if c_.get("type") == "toolCall":
+                inp = json.dumps(c_.get("arguments", {}))
+                texts.append(f"[tool: {c_.get('name','')}] {inp[:200]}")
+            elif c_.get("type") == "text":
+                texts.append(c_.get("text", ""))
+        for text in texts:
+            text = text.strip()
+            if not text or text.startswith("<"):
+                continue
+            if role == "user":
+                badge = col("  you  ", f"{BG_BLUE}{CYAN}")
+            elif role == "assistant":
+                badge = col(" claude ", f"{BG_GREEN}{GREEN}")
+            else:
+                badge = col(" tool ", f"{BG_GRAY}{YELLOW}")
+            print(f"\n{badge}")
+            for line_ in textwrap.wrap(text, width=72, subsequent_indent="       "):
+                print(f"       {WHITE}{line_}{RESET}")
+    print()
+
+
+def cmd_search(keyword: str):
+    kw = keyword.lower()
+    sessions = collect_sessions()
+    found = False
+    for s in sessions:
+        display = s.get("display", s["first_msg"])
+        for d in parse_jsonl(s["path"]):
+            if d.get("type") != "message":
+                continue
+            m = d.get("message") or {}
+            if m.get("role") not in ("user", "assistant"):
+                continue
+            content = m.get("content") or []
+            if isinstance(content, str):
+                content = [{"type": "text", "text": content}]
+            hit = False
+            for b in (content if isinstance(content, list) else []):
+                if not (isinstance(b, dict) and b.get("type") == "text"):
+                    continue
+                text = b.get("text", "")
+                if kw not in text.lower():
+                    continue
+                hit = found = True
+                label = (display[:48] + "…") if len(display) > 48 else display
+                matched = ""
+                for line_ in text.split("\n"):
+                    if kw in line_.lower():
+                        matched = line_.strip()[:72]
+                        break
+                if not matched:
+                    matched = text.strip()[:72]
+                print(f"  {col(s['project_short'], CYAN)}  {col(s['sid'][:8], GRAY)}  {col(label, WHITE)}")
+                print(f"           {col(f'↳ {matched}', GRAY)}")
+                break
+            if hit:
+                break   # one hit per session
+    if not found:
+        print(f"No matches for '{keyword}'.")
+
+
+# ── fzf picker (default) ─────────────────────────────────────────────────────
+
+def cmd_pick():
+    """Interactive fzf picker with preview."""
+    script_path = os.path.abspath(__file__)
+
+    picker_data = subprocess.run(
+        [sys.executable, script_path, "--emit-picker"],
+        capture_output=True, text=True,
+    ).stdout
+
+    if not picker_data.strip():
+        print("No sessions found.")
+        return
+
+    fzf_cmd = [
+        "fzf", "--ansi", "--exact",
+        "--height=100%",
+        "--delimiter=\t",
+        "--with-nth=1", "--nth=1",
+        "--no-sort", "--layout=reverse", "--border=rounded",
+        '--border-label=" 󱜚 Pi Sessions "', "--border-label-pos=2",
+        "--color=border:#0ABDC6,label:#0ABDC6,header:#D300C4",
+        "--color=bg+:#111133,fg+:#ffffff,hl+:#D300C4,hl:#0ABDC6",
+        "--color=pointer:#D300C4,marker:#0ABDC6,spinner:#0ABDC6",
+        '--prompt=❯ ', "--pointer=▶",
+        f"--preview={sys.executable} {script_path} --preview-line {{2}} {{4}}",
+        "--preview-window=right:45%,nohidden,follow",
+        f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({sys.executable} {script_path} --emit-picker)",
+        f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
+        '--header=\x1b[2mCtrl+T: claude-sessions\x1b[0m  \x1b[2mCtrl+A: scope  Ctrl+V: layout\x1b[0m',
+        '--header-lines=1',
+        "--bind=ctrl-j:down,ctrl-k:up",
+        "--bind=J:preview-down,K:preview-up",
+        "--bind=ctrl-d:preview-half-page-down,ctrl-u:preview-half-page-up",
+        "--bind=ctrl-f:preview-page-down,ctrl-b:preview-page-up",
+        "--bind=g:preview-top,G:preview-bottom",
+        "--bind=/:toggle-preview",
+        "--bind=ctrl-/:toggle-preview",
+        "--bind=ctrl-v:change-preview-window(up:99%|right:45%)+refresh-preview",
+    ]
+
+    result = subprocess.run(
+        fzf_cmd + ["--expect=enter,esc,ctrl-t"],
+        input=picker_data,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+
+    # remember scope state before cleanup — carried across a Ctrl+T switch
+    scope_on = not os.path.exists(SCOPE_FLAG)
+
+    for flag in (HELP_FLAG, SCOPE_FLAG):
+        if os.path.exists(flag):
+            os.remove(flag)
+
+    output = result.stdout.strip()
+    if not output:
+        return
+
+    idx = output.find("\n")
+    key = output[:idx] if idx >= 0 else output
+    selected = output[idx + 1:] if idx >= 0 else ""
+
+    if key == "ctrl-t":
+        if not scope_on:                # carry "all" mode to claude-sessions
+            open(SCOPE_FLAG, "w").close()
+        os.execvp("claude-sessions", ["claude-sessions"])
+    elif key == "enter" and selected:
+        parts = selected.split("\t")
+        if len(parts) >= 4:
+            project_path = parts[2].strip()
+            sid = parts[3].strip()
+            if not os.path.isdir(project_path):
+                project_path = str(Path.home())   # project dir deleted since
+            os.chdir(project_path)
+            os.execvp("pi", ["pi", "--session", sid])
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def main():
+    # Internal flags used by fzf preview/picker
+    if len(sys.argv) >= 2 and sys.argv[1] == "--emit-picker":
+        emit_picker_lines()
+        return
+    if len(sys.argv) >= 4 and sys.argv[1] == "--preview-line":
+        render_preview(sys.argv[2], sys.argv[3])
+        return
+
+    if len(sys.argv) < 2:
+        cmd_pick()
+        return
+
+    if sys.argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+
+    cmd = sys.argv[1]
+    args = sys.argv[2:]
+
+    if cmd == "list":
+        cmd_list()
+    elif cmd == "info":
+        if not args:
+            print("Usage: pi-sessions info <id>")
+            return
+        cmd_info(args[0])
+    elif cmd == "view":
+        if not args:
+            print("Usage: pi-sessions view <id>")
+            return
+        cmd_view(args[0])
+    elif cmd == "search":
+        if not args:
+            print("Usage: pi-sessions search <keyword>")
+            return
+        cmd_search(args[0])
+    elif cmd == "pick":
+        cmd_pick()
+    else:
+        print(f"Unknown command: {cmd}\n")
+        print(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main()
