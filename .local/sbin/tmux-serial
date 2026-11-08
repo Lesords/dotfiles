@@ -183,9 +183,10 @@ baud_menu() {  # <mode conn|cfg> <idx> <by-id路径> <短名> <标签>
   [ -z "$def" ] && def=115200
   for b in $BAUDS; do n=$((n+1)); [ "$b" = "$def" ] && pos=$n; done
   [ "$def" = 0 ] && pos=$((n+2))   # 不设(默认) 在分隔行之后
-  local downs=""
+  local trig downs=""
+  trig=$(tmux show -gv @ts_trig 2>/dev/null)   # fork 前捕获, 免得 sleep 后读到别的终端改写的值
   for ((n=1; n<pos; n++)); do downs+=" Down"; done
-  [ -n "$downs" ] && ( sleep 0.1; tmux send-keys -K -t "$(tmux show -gv @ts_trig 2>/dev/null)" $downs ) &
+  [ -n "$downs" ] && ( sleep 0.1; tmux send-keys -K -t "$trig" $downs ) &
   tmux display-menu -T " $5 @ $ti " -x C -y C \
     "${bitems[@]}" "取消" q ""
 }
@@ -376,7 +377,7 @@ case "$stage" in
       if [ "$cn" -lt 10 ] 2>/dev/null; then ck="$cn"
       else ck=$(awk -v n="$cn" 'BEGIN{printf "%c", 87+n}'); fi   # 10→a, 11→b…
       citems+=("$(fmt_disp wls "$cw" "$aw" "$cvw" "$vend" "$prod" "$ifn" "$ct" "$al")" "$ck" "run-shell \"$SELF cfg $ln\"")
-    done <<< /dev/null
+    done
     citems+=("@SEP:操作@" "" "")
     fit_seps citems " 配置哪个口 "
     tmux display-menu -T " 配置哪个口 " -x C -y C \
@@ -415,9 +416,10 @@ case "$stage" in
     sitems+=("@SEP:操作@" "" "")
     sitems+=("返回" "b" "run-shell \"$SELF conn $2\"")
     fit_seps sitems " $label @ 共享 "
-    # 光标推到当前偏好行(关=第二行, 1 Down); 须在阻塞的 display-menu 之前 fork
+    # 光标推到当前偏好行(关=第二行, 1 Down); fork 前捕获 trig, display-menu 阻塞前启动注入
     if [ "$(kv_get @ts_share "$short")" != 1 ]; then
-      ( sleep 0.1; tmux send-keys -K -t "$(tmux show -gv @ts_trig 2>/dev/null)" Down ) &
+      sh_trig=$(tmux show -gv @ts_trig 2>/dev/null)
+      ( sleep 0.1; tmux send-keys -K -t "$sh_trig" Down ) &
     fi
     tmux display-menu -T " $label @ 共享 " -x C -y C \
       "${sitems[@]}" "取消" "q" ""
