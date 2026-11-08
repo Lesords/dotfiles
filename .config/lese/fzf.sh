@@ -84,13 +84,41 @@ fd-vim() {
         --header 'CTRL-T: toggle vim/nvim | Enter: open'
 }
 
+# agents: "launcher:session根目录[:排除]" — 加 agent 加一行
 ai-session() {
-    local tools=(
-        "claude-sessions"
-        "codex-sessions"
+    local cur="${1:-}" a launcher root skip n mark choice
+    local agents=(
+        "claude-sessions:$HOME/.claude/projects:agent-*"
+        "codex-sessions:$HOME/.codex/sessions:"
+        "pi-sessions:$HOME/.pi/agent/sessions:"
     )
-    local choice=$(printf "%s\n" "${tools[@]}" | fzf --no-preview --prompt="AI session> " --height=6 --layout=reverse --border --cycle)
-    [ -n "$choice" ] && "$choice"
+    local -a rows
+    for a in "${agents[@]}"; do
+        launcher=${a%%:*}
+        root=${a#*:}
+        skip=${root#*:}
+        root=${root%%:*}
+        command -v "$launcher" >/dev/null 2>&1 || continue
+        n=$(find "$root" -name '*.jsonl' ${skip:+! -name "$skip"} 2>/dev/null | wc -l)
+        (( n )) || continue
+        [[ $launcher == "$cur" ]] && mark=$'\e[38;5;45m▸\e[0m ' || mark='  '
+        rows+=("${mark}"$'\e[38;5;252m'"${launcher}"$'\e[0m'$'\t'$'\e[38;5;242m'"${n} sessions"$'\e[0m')
+    done
+    ((${#rows[@]})) || { echo "No session pickers available."; return; }
+    choice=$(printf '%s\n' "${rows[@]}" | FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= \
+        fzf --ansi --exact --height=8 --no-sort --layout=reverse \
+            --border=rounded '--border-label=" AI Session Pickers "' \
+            --border-label-pos=2 \
+            --color=border:#0ABDC6,label:#0ABDC6,header:#D300C4 \
+            --color=bg+:#111133,fg+:#ffffff,hl+:#D300C4,hl:#0ABDC6 \
+            --color=pointer:#D300C4,marker:#0ABDC6,spinner:#0ABDC6 \
+            --delimiter='\t' --with-nth=1,2 --nth=1 \
+            --prompt='❯ ' --pointer='▶' \
+            --header=$'\e[2mEnter: open  Esc: quit\e[0m')
+    [[ -n $choice ]] || return
+    launcher=$(printf '%s' "$choice" | sed -e $'s/\x1b\\[[0-9;]*m//g' \
+        -e 's/^[▸ ]*//' | cut -f1)
+    command -v "$launcher" >/dev/null 2>&1 && "$launcher"
 }
 
 if type fzf >/dev/null 2>&1; then

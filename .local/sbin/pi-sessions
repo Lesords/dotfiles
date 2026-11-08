@@ -870,7 +870,7 @@ def cmd_pick():
         "--preview-window=right:45%,nohidden,follow",
         f"--bind=ctrl-a:execute([ -f {SCOPE_FLAG} ] && rm {SCOPE_FLAG} || touch {SCOPE_FLAG})+reload({sys.executable} {script_path} --emit-picker)",
         f"--bind=?:execute([ -f {HELP_FLAG} ] && rm {HELP_FLAG} || touch {HELP_FLAG})+refresh-preview",
-        '--header=\x1b[2mCtrl+T: claude-sessions\x1b[0m  \x1b[2mCtrl+A: scope  Ctrl+V: layout\x1b[0m',
+        '--header=\x1b[2mCtrl+T: switch agent\x1b[0m  \x1b[2mCtrl+A: scope  Ctrl+V: layout\x1b[0m',
         '--header-lines=1',
         "--bind=ctrl-j:down,ctrl-k:up",
         "--bind=J:preview-down,K:preview-up",
@@ -905,9 +905,11 @@ def cmd_pick():
     selected = output[idx + 1:] if idx >= 0 else ""
 
     if key == "ctrl-t":
-        if not scope_on:                # carry "all" mode to claude-sessions
+        if not scope_on:                # carry scope state into the menu chain
             open(SCOPE_FLAG, "w").close()
-        os.execvp("claude-sessions", ["claude-sessions"])
+        os.execvp("bash", ["bash", "-c",
+                           '. "$HOME/.config/lese/fzf.sh" 2>/dev/null; '
+                           'ai-session pi-sessions'])
     elif key == "enter" and selected:
         parts = selected.split("\t")
         if len(parts) >= 4:
