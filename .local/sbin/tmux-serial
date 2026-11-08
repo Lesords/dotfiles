@@ -273,14 +273,16 @@ case "$stage" in
       exit 0
     fi
     tmux set -g @ts_menu "$snap"
-    if [ ${#shrows[@]} -gt 0 ]; then     # 挂载区: 端口↔串口映射 + 一键 nc 围观
-      hks="hijklmn"
-      items+=("@SEP:共享中 · 挂载(nc) Ctrl-C 退@" "" "")
+    if [ ${#shrows[@]} -gt 0 ]; then     # 挂载区: Shift+数字(序号对应; tty=裸数字, menu 导航=j/k, 零冲突)
+      items+=("@SEP:共享中 · 挂载(nc) · Ctrl-C 退@" "" "")
+      hkspool=("!" "@" "#" "$" "%" "^" "&" "*" "(" ")")
+      hi=0
       for sr in "${shrows[@]}"; do
         IFS=$'\t' read -r sport sname stn <<< "$sr"
-        k="${hks:0:1}"; hks="${hks:1}"
-        [ -z "$k" ] && break
-        items+=("挂 $sport = $sname ($stn)" "$k" "run-shell \"$SELF attach $sport\"")
+        hk="${hkspool[$hi]:-}"
+        [ -z "$hk" ] && break               # 池尽(10 个共享), 其余 ↑↓+Enter
+        items+=("挂 $sport = $sname ($stn)" "$hk" "run-shell \"$SELF attach $sport\"")
+        hi=$((hi+1))
       done
     fi
     items+=("@SEP:操作@" "" "")
