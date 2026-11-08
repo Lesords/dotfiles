@@ -401,7 +401,7 @@ case "$stage" in
     [ -z "$line" ] && { msg "端口快照缺失, 请重新触发"; exit 0; }
     IFS=$'\t' read -r byid short label <<< "$line"
     t=$(readlink -f "$byid"); t=${t##*/}
-    sport=$((SHBASE + $(tty_num "$t")))
+    sport=$(sh_port "$t")                   # 走顺延逻辑, 与实际连接端口一致
     if [ "$(kv_get @ts_share "$short")" = 1 ]; then
       on="共享: 开 ($sport) ◂"; off="共享: 关"
     else
@@ -468,11 +468,12 @@ case "$stage" in
     esac
     [ -z "$line" ] && exit 0
     IFS=$'\t' read -r _byid short _label <<< "$line"
+    # 白名单(字母数字._-): 空格/引号/分号会破坏 run-shell 拼接与 kv 存储
     case "${3:-}" in
-      *" "*) msg "别名不能含空格"; exit 0 ;;
+      "") kv_set @ts_alias "$short" - ;;
+      *[!A-Za-z0-9._-]*) msg "别名仅限 字母/数字/./_/-"; exit 0 ;;
+      *) kv_set @ts_alias "$short" "$3" ;;
     esac
-    if [ -n "${3:-}" ]; then kv_set @ts_alias "$short" "$3"
-    else kv_set @ts_alias "$short" -; fi
     exec "$SELF" start
     ;;
 
@@ -481,6 +482,9 @@ case "$stage" in
       for e in $(tmux show -gv @ts_alias 2>/dev/null); do echo "${e%%=*}=${e#*=}"; done
       exit 0
     fi
+    case "$3" in
+      *[!A-Za-z0-9._-]*) msg "别名仅限 字母/数字/./_/-"; exit 1 ;;
+    esac
     kv_set @ts_alias "$2" "$3"
     ;;
 
