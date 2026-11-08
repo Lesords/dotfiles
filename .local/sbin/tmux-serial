@@ -264,6 +264,8 @@ case "$stage" in
       esac
       shrows+=("$sport"$'\t'"$sname"$'\t'"$stty")
     done < <(sh_sessions)
+    # 挂载区按 tty 编号排(与上方串口列表同序); -V 版本感知: ACM2 排在 ACM10 前
+    [ ${#shrows[@]} -gt 1 ] && mapfile -t shrows < <(printf '%s\n' "${shrows[@]}" | sort -t$'\t' -k3,3V)
 
     for r in "${rows[@]}"; do
       IFS=$'\t' read -r l short vend prod ifn tty al <<< "$r"
