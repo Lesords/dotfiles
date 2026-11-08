@@ -36,6 +36,7 @@ parse_byid() {
   local b="${1##*/}" ifn prod vend
   vend="${b#usb-}"; vend="${vend%%_*}"
   b="${b#usb-}"; b="${b#*_}"              # 去 vendor 字段
+  b="${b%-port[0-9]*}"                    # FTDI/CP210x 系尾部多 -portN, 先剥
   ifn=$(printf '%s' "$b" | grep -o 'if[0-9]*$')
   [ -n "$ifn" ] && b="${b%_$ifn}"
   b="${b%_*}"                             # 去序列号
@@ -334,6 +335,7 @@ case "$stage" in
       t=$(readlink -f "$byid"); t=${t##*/}
       cmd+=" -S inet:$(sh_port "$t")"
     fi
+    tmux send-keys -t "$cur" C-u          # 清掉 shell 行上残留的半截输入, 防拼接成脏命令
     tmux send-keys -t "$cur" "$cmd $byid" Enter
     cleanup
     ;;
@@ -481,6 +483,7 @@ case "$stage" in
     case "${2:-}" in ''|*[!0-9]*) exit 0 ;; esac
     cur=$(trig_shell)
     if [ -z "$cur" ]; then msg "当前 pane 不是 shell, 未挂载"; exit 0; fi
+    tmux send-keys -t "$cur" C-u          # 清残留输入
     tmux send-keys -t "$cur" "nc 127.0.0.1 $2" Enter
     ;;
 
