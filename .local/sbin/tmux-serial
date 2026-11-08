@@ -192,6 +192,33 @@ baud_menu() {  # <mode conn|cfg> <idx> <by-id路径> <短名> <标签>
 }
 
 case "$stage" in
+  help|-h|--help)
+    cat <<'EOF'
+用法: tmux-serial <stage> [参数]
+
+用户入口:
+  (无参 / start)       交互菜单: 端口(键=tty编号) → 波特率 → 共享 → tio (通常绑 prefix u)
+  map                  全状态 TSV: 别名/端口/标签/tty/by-id/状态 (tab 分隔, 供脚本 awk 解析)
+  map pretty           同上, 列对齐 + 表头 (人看)
+  alias                列出所有别名
+  alias <短名> <名|->  设置/清除别名 (仅限 字母/数字/./_/-)
+  help                 本帮助
+
+菜单内快捷键:
+  数字=选口  c=配置  q=取消  b=返回  j/k=上下  Shift+序号=挂载共享
+
+内部 stage (菜单链路自动调用, 一般不直接用):
+  conn <idx> [baud]    连接流程入口 (无 baud 弹菜单)
+  cfgmnu / cfg <idx>   配置选口 / 配置菜单
+  shmenu <idx> <baud>  共享选择菜单
+  share <idx> <baud> <0|1>  记共享偏好 → 连接
+  setbaud <idx> <baud> 存波特率记忆(不连接)
+  shswap <idx>         切换共享偏好
+  name <idx> <别名>    设置/清除别名(菜单内命名走此)
+  attach <port>        nc 挂载共享端口
+EOF
+    ;;
+
   start)
     cleanup
     # 触发 pane 显式快照(run-shell 上下文的 display -p 不可靠), conn 往这敲命令
@@ -500,7 +527,7 @@ case "$stage" in
     tmux send-keys -t "$cur" "nc 127.0.0.1 $2" Enter
     ;;
 
-  map)                                    # 全状态 TSV: 别名/端口/标签/tty/by-id/状态
+  map)                                    # 全状态: 默认 TSV(agent 用, awk -F'\t'), pretty=列对齐人看
     # 一次扫全部 tio 进程, 按 tty 归一: connected/shared 都带波特率(对称)
     declare -A mport=() mbaud=() mconn=()
     for pid in $(pgrep -x tio); do
@@ -514,6 +541,7 @@ case "$stage" in
       else mconn["$tty"]=1; fi
       mbaud["$tty"]="${baud:-default}"
     done
+    mrows=()
     for l in /dev/serial/by-id/*; do
       [ -e "$l" ] || continue
       IFS=$'\t' read -r short vend prod ifn < <(parse_byid "$l")
@@ -522,8 +550,26 @@ case "$stage" in
       if [ -n "${mport[$tty]}" ]; then state="shared(${mbaud[$tty]})"; port="${mport[$tty]}"
       elif [ -n "${mconn[$tty]}" ]; then state="connected(${mbaud[$tty]})"; port="-"
       else state="idle"; port="-"; fi
-      printf '%s\t%s\t%s %s\t%s\t%s\t%s\n' \
-        "$al" "$port" "$prod" "$ifn" "$tty" "$l" "$state"
+      mrows+=("$al"$'\t'"$port"$'\t'"$prod $ifn"$'\t'"$tty"$'\t'"$l"$'\t'"$state")
     done
+    if [ "${2:-}" = pretty ]; then        # 人看: 别名/端口/标签/tty/状态 pad 对齐, by-id 尾列不 pad
+      mrows=("ALIAS"$'\t'"PORT"$'\t'"LABEL"$'\t'"TTY"$'\t'"BY-ID"$'\t'"STATE" "${mrows[@]}")
+      mw=(0 0 0 0 0)
+      for r in "${mrows[@]}"; do
+        IFS=$'\t' read -r _a _b _c _d _e st _ <<< "$r"
+        vals=(); IFS=$'\t' read -ra vals <<< "$r"
+        for i in 0 1 2 3 4; do
+          v="${vals[$i]}"; [ "$i" = 4 ] && v="$st"
+          w=$(dispw "$v"); (( w > ${mw[$i]} )) && mw[$i]=$w
+        done
+      done
+      for r in "${mrows[@]}"; do
+        IFS=$'\t' read -r a b c d byid st <<< "$r"
+        printf '%-*s  %-*s  %-*s  %-*s  %-*s  %s\n' \
+          "${mw[0]}" "$a" "${mw[1]}" "$b" "${mw[2]}" "$c" "${mw[3]}" "$d" "${mw[4]}" "$st" "$byid"
+      done
+    else
+      for r in "${mrows[@]}"; do printf '%s\n' "$r"; done
+    fi
     ;;
 esac
