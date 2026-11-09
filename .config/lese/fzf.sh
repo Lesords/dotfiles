@@ -48,6 +48,96 @@ fzf-cd() {
     cd "$target" 2>/dev/null || echo "无效路径: $target"
 }
 
+# 常用命令存 ~/.cache/.cmd_bookmarks，一行一条
+fzf-cmd() {
+    local file="$HOME/.cache/.cmd_bookmarks"
+    local hist=no prompt='cmd:book> ' expect=ctrl-a,ctrl-e,ctrl-d,ctrl-o
+    local header='Enter: 填入命令行 | Ctrl-O: 执行 | Ctrl-A: 添加 | Ctrl-E: 编辑 | Ctrl-D: 删除 | Esc: 退出'
+    case "${1:-}" in
+        -h|history) hist=yes
+            prompt='cmd:hist> '
+            expect=ctrl-a,ctrl-s,ctrl-o
+            header='Enter: 填入命令行 | Ctrl-O: 执行 | Ctrl-S: 收藏为常用 | Ctrl-A: 添加 | Esc: 退出'
+            ;;
+    esac
+    local out out2 key2 pick= new tmp edited query key choice
+    local -a hlines lines fields
+    mapfile -t hlines < <(history | sed 's/^[[:space:]]*[0-9]*[[:space:]]*//' | tac | awk '$0 && !seen[$0]++')
+
+    while :; do
+        if [[ $hist == yes ]]; then
+            lines=("${hlines[@]}")
+        else
+            mapfile -t lines < "$file" 2>/dev/null || lines=()
+        fi
+        out=$(printf '%s\n' "${lines[@]}" | FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= \
+            fzf --height 60% --layout=reverse --border \
+                --prompt "$prompt" --header "$header" \
+                --print-query --expect="$expect")
+        mapfile -t fields <<<"$out"
+        query=${fields[0]} key=${fields[1]} choice=${fields[2]}
+
+        if [[ -z $key || $key == ctrl-o ]]; then
+            [[ -n $choice ]] || return
+            if [[ $key == ctrl-o ]]; then
+                eval "$choice"
+            elif [[ ${READLINE_LINE+set} ]]; then
+                READLINE_LINE=$choice
+                READLINE_POINT=${#READLINE_LINE}
+            elif [[ -n $TMUX ]]; then
+                stty -echo
+                tmux set-buffer -b fzf-cmd -- "$choice"
+                tmux paste-buffer -b fzf-cmd
+                stty echo
+            else
+                eval "$choice"
+            fi
+            return
+        fi
+        [[ -n $choice || $key == ctrl-a ]] || continue
+
+        case $key in
+            ctrl-a)
+                if ((${#hlines[@]})); then
+                    out2=$(printf '%s\n' "${hlines[@]}" | FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= \
+                        fzf --height 40% --layout=reverse --border \
+                            --prompt 'cmd:pick> ' --query="$query" --expect=ctrl-e \
+                            --header 'Enter: 添加 | Ctrl-E: 选后编辑 | Esc: 手动输入')
+                    key2=$(sed -n '1p' <<<"$out2")
+                    pick=$(tail -n +2 <<<"$out2")
+                    if [[ -z $key2 && -n $pick ]]; then
+                        ! grep -qxF "$pick" "$file" 2>/dev/null && printf '%s\n' "$pick" >> "$file"
+                        continue
+                    fi
+                    [[ $key2 == ctrl-e ]] || pick=
+                fi
+                read -e -r -p 'new cmd: ' -i "$pick" new
+                [[ -n $new ]] && ! grep -qxF "$new" "$file" 2>/dev/null && printf '%s\n' "$new" >> "$file"
+                ;;
+            ctrl-e)
+                tmp=$(mktemp /tmp/fzf-cmd.XXXXXX)
+                printf '%s\n' "$choice" > "$tmp"
+                "${EDITOR:-vim}" "$tmp"
+                edited=$(grep -m1 '[^[:space:]]' "$tmp")
+                rm -f "$tmp"
+                [[ -n $edited && $edited != "$choice" ]] || continue
+                OLD="$choice" NEW="$edited" \
+                    awk '$0==ENVIRON["OLD"] && !d {$0=ENVIRON["NEW"]; d=1} $0 && !seen[$0]++' \
+                    "$file" > "$file.tmp"
+                mv "$file.tmp" "$file"
+                ;;
+            ctrl-d)
+                { grep -vFx "$choice" "$file" || true; } > "$file.tmp"
+                mv "$file.tmp" "$file"
+                ;;
+            ctrl-s)
+                ! grep -qxF "$choice" "$file" 2>/dev/null \
+                    && printf '%s\n' "$choice" >> "$file" && echo "已收藏: $choice"
+                ;;
+        esac
+    done
+}
+
 fzf-vim() {
     local f=/tmp/fzf-vim-mode
     [[ -f $f ]] || echo vim > "$f"
@@ -127,6 +217,7 @@ if type fzf >/dev/null 2>&1; then
     alias fzf-start="fzf --bind 'enter:become(start {})'"
     if [ -t 1 ]; then
         bind -x '"\C-f": "fzf-vim"'
+        bind -x '"\eg": "fzf-cmd"'
         bind '"\eh": "\C-ufzf-cd\C-m"'
         if [ "$MSYSTEM" ]; then
             bind -x '"\es": "fzf-start"'
