@@ -258,6 +258,15 @@ git --git-dir=$HOME/dotfiles.git/ --work-tree=$HOME submodule update --init --re
 | Ctrl + Shift + e | Click URL with keyboard  |
 | Ctrl + Shift + u | Input unicode character  |
 
+## Bash
+
+| Context | Shortcut Keys | Action                    |
+| ------- | ------------- | ------------------------- |
+| Shell   | Ctrl + f      | fzf-vim: open file        |
+| Shell   | Alt + g       | fzf-cmd: pick a command   |
+| Shell   | Alt + h       | fzf-cd: cd to a bookmark  |
+| Shell   | Alt + s       | claude-sessions picker    |
+
 # Agent services
 
 | Service | Port | Purpose |
