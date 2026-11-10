@@ -1,6 +1,6 @@
 #!/bin/bash
 # tmux-serial: 串口连接器(基于 tio), 快照菜单做法同 tmux-move-to
-# prefix u → 分步连接: ①端口菜单(键=tty编号) → ②波特率(纯档位) → ③共享(开/关) → 连接
+# prefix u → 分步连接: ①端口菜单(键=行序, 从上到下 0,1,2…) → ②波特率(纯档位) → ③共享(开/关) → 连接
 #   ●=已连接 ◎=共享中 [别名]列; (c)配置…=不连接只改参数(档位/共享/命名); 底部挂载区(nc)围观
 # tmux-serial map → 全状态 TSV(别名/端口/标签/tty/by-id/状态), 供 agent 查询
 # 端口身份用 /dev/serial/by-id(重插稳定, tio 断线自动重连回同一口)
@@ -197,7 +197,7 @@ case "$stage" in
 用法: tmux-serial <stage> [参数]
 
 用户入口:
-  (无参 / start)       交互菜单: 端口(键=tty编号) → 波特率 → 共享 → tio (通常绑 prefix u)
+  (无参 / start)       交互菜单: 端口(键=行序) → 波特率 → 共享 → tio (通常绑 prefix u)
   map                  全状态 TSV: 别名/端口/标签/tty/by-id/状态 (tab 分隔, 供脚本 awk 解析)
   map pretty           同上, 列对齐 + 表头 (人看)
   alias                列出所有别名
@@ -205,7 +205,7 @@ case "$stage" in
   help                 本帮助
 
 菜单内快捷键:
-  数字=选口  c=配置  q=取消  b=返回  j/k=上下  Shift+序号=挂载共享
+  数字=选口(行序)  c=配置  q=取消  b=返回  j/k=上下  Shift+序号=挂载共享
 
 内部 stage (菜单链路自动调用, 一般不直接用):
   conn <idx> [baud]    连接流程入口 (无 baud 弹菜单)
@@ -229,24 +229,20 @@ EOF
     [ -z "$cw" ] && cw=$(tmux display -p -t "$trig" '#{client_width}' 2>/dev/null)
     snap=""
     items=()
-    declare -A used=()
     idx=1
 
-    # 键 = tty 编号(按 N 即连 ttyACM/USB N, 缺号空置不前移);
-    # >9 或同号冲突(ACM0+USB0)顺延字母, q 留给「取消」
-    keyfor() {  # <编号> → 键(耗尽则空)
-      local k=""
-      if [ "$1" -lt 10 ] 2>/dev/null && [ -z "${used[$1]}" ]; then
-        k="$1"
-      else
-        for lt in {a..z}; do
-          [ "$lt" = q ] && continue
-          [ "$lt" = c ] && continue           # c 留给「配置」
-          [ -z "${used[$lt]}" ] && { k="$lt"; break; }
-        done
-      fi
-      [ -n "$k" ] && used[$k]=1
-      printf '%s' "$k"
+    # 键 = 行序(显示列表从上到下 0,1,2…): 插拔重编号/ACM+USB 同号都不影响,
+    # 视觉顺序与键位恒一致; >10 行顺延字母(跳 q 取消 / c 配置)
+    rowkey() {  # <行号(1起)> → 键(耗尽则空)
+      local n=$1 lt
+      if [ "$n" -le 10 ] 2>/dev/null; then printf '%d' "$((n-1))"; return; fi
+      n=$((n-11))
+      for lt in {a..z}; do
+        [ "$lt" = q ] && continue
+        [ "$lt" = c ] && continue
+        if [ "$n" -eq 0 ]; then printf '%s' "$lt"; return; fi
+        n=$((n-1))
+      done
     }
 
     add() {  # add <显示行> <键> <快照行>
@@ -297,7 +293,7 @@ EOF
 
     for r in "${rows[@]}"; do
       IFS=$'\t' read -r l short vend prod ifn tty al <<< "$r"
-      k=$(keyfor "$((10#${tty#"${tty%%[0-9]*}"}))")
+      k=$(rowkey "$idx")
       [ -z "$k" ] && continue            # 键耗尽, 静默截断
       if [ -n "$(tio_pane "$l")" ]; then m="● "; else m="  "; fi
       disp="$(fmt_disp wls "$cw" "$aw" "$cvw" "$vend" "$prod" "$ifn" "$tty" "$al")"
@@ -375,7 +371,7 @@ EOF
     cleanup
     ;;
 
-  cfgmnu)                                # 配置选口: 键=tty编号(与一级一致), 选中弹配置菜单
+  cfgmnu)                                # 配置选口: 键=行序(与一级一致), 选中弹配置菜单
     snap=$(tmux show -gv @ts_menu 2>/dev/null)
     if [ -z "$snap" ]; then msg "快照缺失, 请重新触发"; exit 0; fi
     # 行构造与主页一致(逐词 pad + 别名列): 先收集算列宽, 再拼行
@@ -400,9 +396,7 @@ EOF
     for cr in "${crows[@]}"; do
       ln=$((ln+1))
       IFS=$'\t' read -r cbyid short vend prod ifn ct al <<< "$cr"
-      cn=$(tty_num "$ct")
-      if [ "$cn" -lt 10 ] 2>/dev/null; then ck="$cn"
-      else ck=$(awk -v n="$cn" 'BEGIN{printf "%c", 87+n}'); fi   # 10→a, 11→b…
+      ck=$(rowkey "$ln")
       citems+=("$(fmt_disp wls "$cw" "$aw" "$cvw" "$vend" "$prod" "$ifn" "$ct" "$al")" "$ck" "run-shell \"$SELF cfg $ln\"")
     done
     citems+=("@SEP:操作@" "" "")
